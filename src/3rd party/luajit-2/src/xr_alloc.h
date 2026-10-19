@@ -11,4 +11,7 @@ void XR_DESTROY(void* p, size_t size);
 
 void XR_EARLY_INIT();
 
+struct lua_XRayMemoryError;
+void XR_MEMORY_ERROR_POOL_INFO(struct lua_XRayMemoryError* info);
+
 #endif

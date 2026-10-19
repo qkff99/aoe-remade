@@ -233,6 +233,16 @@ LUA_API int lua_gcstep_one(lua_State *L, int data);
 LUA_API void lua_gcincremental(lua_State *L, int enabled);
 LUA_API int lua_gc_resume_automatic(lua_State *L);
 LUA_API const void* lua_vmidentity(lua_State *L);
+/* Failure-only snapshot. Sizes are bytes; kind 1=realloc, 2=new GC object. */
+typedef struct lua_XRayMemoryError {
+  unsigned long long sequence;
+  size_t requested, previous, heap, threshold, debt;
+  unsigned kind, phase, incremental, hookmask;
+  const void *pool_base;
+  size_t pool_reserved, pool_used, pool_largest_free;
+  unsigned pool_invalid_chunks, pool_reserve_status;
+} lua_XRayMemoryError;
+LUA_API int lua_xray_memory_error_snapshot(lua_State *L, lua_XRayMemoryError *info);
 enum {
   LUA_GCPHASE_PAUSE, LUA_GCPHASE_MARK, LUA_GCPHASE_REMARK, LUA_GCPHASE_SEPARATE,
   LUA_GCPHASE_ATOMIC, LUA_GCPHASE_SWEEPSTRING, LUA_GCPHASE_SWEEP, LUA_GCPHASE_FINALIZE

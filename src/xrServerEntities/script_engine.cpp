@@ -16,6 +16,48 @@
 #include <unordered_map>
 #include <set>
 #include <luabind/class_info.hpp>
+#include "../xrEngine/IGame_Level.h"
+
+extern ENGINE_API BOOL g_appLoaded;
+
+namespace
+{
+void report_lua_memory_error(lua_State* L)
+{
+    if (!L || lua_type(L, -1) != LUA_TSTRING)
+        return;
+    const char* error = lua_tostring(L, -1);
+    if (!error || !strstr(error, "not enough memory"))
+        return;
+
+    lua_XRayMemoryError info = {};
+    const bool recorded = lua_xray_memory_error_snapshot(L, &info) != 0;
+    size_t heap = 0, threshold = 0, debt = 0;
+    int phase = -1;
+    lua_gcmetrics(L, &heap, &threshold, &debt, &phase);
+    Msg("! [LuaOOM] units=bytes vm=%p thread=%lu frame=%u stack=%d allocator_failure_recorded=%u sequence=%llu",
+        lua_vmidentity(L), GetCurrentThreadId(), Device.dwFrame, lua_gettop(L), unsigned(recorded), info.sequence);
+    Msg("! [LuaOOM] allocation kind=%u (1=realloc,2=new-object) requested=%llu previous=%llu heap_at_failure=%llu threshold_at_failure=%llu debt_at_failure=%llu phase_at_failure=%u incremental=%u hookmask=0x%X",
+        info.kind, (unsigned long long)info.requested, (unsigned long long)info.previous,
+        (unsigned long long)info.heap, (unsigned long long)info.threshold,
+        (unsigned long long)info.debt, info.phase, info.incremental, info.hookmask);
+    Msg("! [LuaOOM] current heap=%llu threshold=%llu debt=%llu phase=%d (0=pause,1=mark,2=remark,3=separate,4=atomic,5=sweepstrings,6=sweep,7=finalize)",
+        (unsigned long long)heap, (unsigned long long)threshold, (unsigned long long)debt, phase);
+    Msg("! [LuaOOM] low-address-pool base=%p reserved=%llu used=%llu largest_free_block=%llu invalid_map_chunks=%u reserve_status=0x%08X",
+        info.pool_base, (unsigned long long)info.pool_reserved, (unsigned long long)info.pool_used,
+        (unsigned long long)info.pool_largest_free, info.pool_invalid_chunks, info.pool_reserve_status);
+    Msg("! [LuaOOM] owner main=%u game_logic=%u always_active=%u automatic_gc_allowed=%u generation=%u frame_steps=%d cycle_done=%u app_loaded=%u level_ready=%u precache=%u",
+        unsigned(Device.IsMainThread()), unsigned(Device.IsGameLogicThread()), unsigned(Device.LuaGCAlwaysActive()),
+        unsigned(Device.LuaGCAutomaticAllowed()), Device.LuaGCGeneration(), Device.LuaGCCount, unsigned(Device.LuaGCDone),
+        unsigned(g_appLoaded), unsigned(g_pGameLevel && g_pGameLevel->bReady), Device.dwPrecacheFrame);
+    MEMORYSTATUSEX memory = {};
+    memory.dwLength = sizeof(memory);
+    if (GlobalMemoryStatusEx(&memory))
+        Msg("! [LuaOOM] system free_physical=%llu free_commit=%llu free_virtual=%llu memory_load=%lu%%",
+            memory.ullAvailPhys, memory.ullAvailPageFile, memory.ullAvailVirtual, memory.dwMemoryLoad);
+    xrLogger::FlushLog();
+}
+}
 
 #ifdef USE_DEBUGGER
 #	ifndef USE_LUA_STUDIO
@@ -191,6 +233,7 @@ void CScriptEngine::unload()
 
 int CScriptEngine::lua_panic(lua_State* L)
 {
+	report_lua_memory_error(L);
 	ai().script_engine().print_stack();
 	print_output(L, "PANIC", LUA_ERRRUN);
 	return (0);
@@ -223,6 +266,7 @@ xr_vector<xr_string> get_lua_stack(lua_State* L)
 
 void CScriptEngine::lua_error(lua_State* L)
 {
+	report_lua_memory_error(L);
 	ai().script_engine().print_stack();
 	print_output(L, "", LUA_ERRRUN);
 	ai().script_engine().on_error(L);
@@ -284,6 +328,7 @@ void printLuaStack()
 
 int CScriptEngine::lua_pcall_failed(lua_State* L)
 {
+	report_lua_memory_error(L);
 	ai().script_engine().print_stack();
 	print_output(L, "", LUA_ERRRUN);
 	ai().script_engine().on_error(L);

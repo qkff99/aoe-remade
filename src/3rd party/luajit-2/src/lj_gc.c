@@ -25,6 +25,7 @@
 #endif
 #include "lj_trace.h"
 #include "lj_vm.h"
+#include "xr_alloc.h"
 
 #if LJ_HASPROFILE
 #include "lj_allocprof.h"
@@ -1001,14 +1002,51 @@ void lj_gc_barriertrace(global_State *g, uint32_t traceno)
 
 /* -- Allocator ----------------------------------------------------------- */
 
+#if LJ_TARGET_WINDOWS
+static __declspec(thread) lua_XRayMemoryError last_memory_error;
+static __declspec(thread) global_State *last_memory_error_vm;
+#else
+static __thread lua_XRayMemoryError last_memory_error;
+static __thread global_State *last_memory_error_vm;
+#endif
+
+static void record_memory_error(global_State *g, MSize previous, MSize requested,
+                               unsigned kind)
+{
+  ++last_memory_error.sequence;
+  last_memory_error.requested = requested;
+  last_memory_error.previous = previous;
+  last_memory_error.heap = g->gc.total;
+  last_memory_error.threshold = g->gc.threshold;
+  last_memory_error.debt = g->gc.debt;
+  last_memory_error.kind = kind;
+  last_memory_error.phase = g->gc.state;
+  last_memory_error.incremental = g->gc.incremental;
+  last_memory_error.hookmask = g->hookmask;
+  last_memory_error_vm = g;
+}
+
+LUA_API int lua_xray_memory_error_snapshot(lua_State *L, lua_XRayMemoryError *info)
+{
+  int matched;
+  if (info == NULL) return 0;
+  memset(info, 0, sizeof(*info));
+  matched = last_memory_error_vm == G(L);
+  if (matched) *info = last_memory_error;
+  XR_MEMORY_ERROR_POOL_INFO(info);
+  return matched;
+}
+
 /* Call pluggable memory allocator to allocate or resize a fragment. */
 void *lj_mem_realloc(lua_State *L, void *p, MSize osz, MSize nsz)
 {
   global_State *g = G(L);
   lua_assert((osz == 0) == (p == NULL));
   p = g->allocf(g->allocd, p, osz, nsz);
-  if (p == NULL && nsz > 0)
+  if (p == NULL && nsz > 0) {
+    record_memory_error(g, osz, nsz, 1);
     lj_err_mem(L);
+  }
   lua_assert((nsz == 0) == (p == NULL));
   lua_assert(checkptr32(p));
   g->gc.total = (g->gc.total - osz) + nsz;
@@ -1024,8 +1062,10 @@ void * LJ_FASTCALL lj_mem_newgco(lua_State *L, MSize size)
 {
   global_State *g = G(L);
   GCobj *o = (GCobj *)g->allocf(g->allocd, NULL, 0, size);
-  if (o == NULL)
+  if (o == NULL) {
+    record_memory_error(g, 0, size, 2);
     lj_err_mem(L);
+  }
   lua_assert(checkptr32(o));
   g->gc.total += size;
   setgcrefr(o->gch.nextgc, g->gc.root);

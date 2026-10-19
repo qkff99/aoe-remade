@@ -1,4 +1,5 @@
 #include "xr_alloc.h"
+#include "lua.h"
 #include "lj_def.h"
 #include "lj_arch.h"
 
@@ -24,6 +25,7 @@ extern PNTAVM ntavm;
 #define CHUNKS_FROM_SIZE(x) ((x + CHUNK_SIZE - 1) / CHUNK_SIZE)
 
 static int inited = 0;
+static unsigned reserve_status;
 void* g_heap;
 char g_heapMap[CHUNK_COUNT + 1];
 char* g_firstFreeChunk;
@@ -43,6 +45,7 @@ void XR_INIT()
 	size_t size = CHUNK_SIZE * CHUNK_COUNT;
 	long st = ntavm(INVALID_HANDLE_VALUE, &g_heap, NTAVM_ZEROBITS, &size,
 	                MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+	reserve_status = (unsigned)st;
 
 	for (int i = 0; i < CHUNK_COUNT; i++)
 		g_heapMap[i] = 'x';
@@ -54,6 +57,31 @@ void XR_INIT()
 	OutputDebugString(buf);
 #endif
 	inited = 1;
+}
+
+/* Inspect the existing map only on failure; no allocation or GC is performed. */
+void XR_MEMORY_ERROR_POOL_INFO(struct lua_XRayMemoryError* info)
+{
+	size_t used = 0, run = 0, largest = 0;
+	unsigned invalid = 0;
+	int i;
+	info->pool_base = g_heap;
+	info->pool_reserve_status = reserve_status;
+	if (!inited || !g_heap)
+		return;
+	for (i = 0; i < CHUNK_COUNT; ++i) {
+		if (g_heapMap[i] == 'x') {
+			if (++run > largest) largest = run;
+		} else {
+			run = 0;
+			if (g_heapMap[i] == 'a') ++used;
+			else ++invalid;
+		}
+	}
+	info->pool_reserved = (size_t)CHUNK_COUNT * CHUNK_SIZE;
+	info->pool_used = used * CHUNK_SIZE;
+	info->pool_largest_free = largest * CHUNK_SIZE;
+	info->pool_invalid_chunks = invalid;
 }
 
 void* XR_MMAP(size_t size)
