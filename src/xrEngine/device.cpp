@@ -113,7 +113,6 @@ extern void CheckPrivilegySlowdown();
 
 void CRenderDevice::End(void)
 {
-    StopLuaGCWindow(LuaGCStopReason::End);
 	PROF_EVENT("Render: End");
 
 #ifndef DEDICATED_SERVER

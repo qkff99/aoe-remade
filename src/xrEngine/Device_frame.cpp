@@ -79,16 +79,25 @@ bool CRenderDevice::HasPresentSlack() const
 
 void CRenderDevice::BeforePresent()
 {
+    if (frame_pacer_in_frame)
+    {
+        frame_pacer_wait_start = CPU::QPC();
+        frame_pacer_wait_sample = {};
+        frame_pacer_target = frame_pacer.Period();
+        if (frame_pacer.Deadline())
+        {
+            // Rendering is complete, but its unused presentation interval still
+            // belongs to background work. Late UI Lua may have joined the owner.
+            if (HasPresentSlack()) ResumeLuaGCForRender();
+            PROF_EVENT("FramePacer.Wait");
+            frame_pacer_wait_sample = frame_pacer_wait.Until(frame_pacer.Deadline(), CPU::qpc_freq);
+        }
+    }
+    // End the work window only when handing the frame to Present. Keep the
+    // existing owner join after Present; an admitted unit may still be finishing.
+    StopLuaGCWindow(LuaGCStopReason::End);
     if (!frame_pacer_in_frame)
         return;
-    frame_pacer_wait_start = CPU::QPC();
-    frame_pacer_wait_sample = {};
-    frame_pacer_target = frame_pacer.Period();
-    if (frame_pacer.Deadline())
-    {
-        PROF_EVENT("FramePacer.Wait");
-        frame_pacer_wait_sample = frame_pacer_wait.Until(frame_pacer.Deadline(), CPU::qpc_freq);
-    }
     frame_pacer_present_start = CPU::QPC();
     frame_pacer_sample = frame_pacer.Presented(frame_pacer_present_start);
 }
@@ -236,7 +245,7 @@ void CRenderDevice::BeginLuaGCFrame()
 void CRenderDevice::ResumeLuaGCForRender()
 {
     if (GetCurrentThreadId() != frame_main_thread || !lua_gc_always_frame ||
-        lua_gc_render_resumed || !isRendering || game_logic_pending.load(std::memory_order_acquire) ||
+        !isRendering || game_logic_pending.load(std::memory_order_acquire) ||
         !g_pGameLevel || !g_pGameLevel->bReady ||
         lua_gc_window.Reason() != LuaGCStopReason::LuaRequest)
         return;
