@@ -81,6 +81,11 @@ extern Flags32 psAI_Flags;
 #	endif //-DEBUG
 #endif //!XRSE_FACTORY_EXPORTS
 #include "lua.hpp"
+#include "../xrCore/profiler.h"
+
+#if XRCORE_PROFILER == PROFILER_TRACY
+#include "../3rd party/tracy-0.14.1/public/tracy/TracyLua.hpp"
+#endif
 
 #ifdef USE_LUAJIT_ONE
 void jit_command(lua_State*, LPCSTR);
@@ -483,6 +488,9 @@ void CScriptEngine::init()
 #endif // #ifdef USE_LUA_STUDIO
 
 	::luabind::open(lua());
+#if XRCORE_PROFILER == PROFILER_TRACY
+	tracy::LuaRegister(lua());
+#endif
 	::luabind::bind_class_info(lua());
 	setup_callbacks();
 	export_classes(lua());
@@ -507,6 +515,10 @@ void CScriptEngine::init()
 	bool save = m_reload_modules;
 	m_reload_modules = true;
 	process_file_if_exists("_G", false);
+	m_reload_modules = save;
+
+	m_reload_modules = true;
+	process_file_if_exists("profiler_lua", false);
 	m_reload_modules = save;
 
 	register_script_classes();

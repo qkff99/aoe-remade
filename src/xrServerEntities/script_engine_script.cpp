@@ -11,6 +11,7 @@
 #include "ai_space.h"
 #include "script_debugger.h"
 #include "new_sds.h"
+#include "../xrCore/profiler.h"
 
 using namespace luabind;
 
@@ -225,6 +226,15 @@ static bool is_enough_address_space_available_impl()
 }
 #endif //-XRGAME_EXPORTS
 
+static bool IsTracyConnected()
+{
+#if XRCORE_PROFILER == PROFILER_TRACY
+	return tracy::GetProfiler().IsConnected();
+#else
+	return false;
+#endif
+}
+
 #pragma optimize("s",on)
 void CScriptEngine::script_register(lua_State* L)
 {
@@ -245,6 +255,7 @@ void CScriptEngine::script_register(lua_State* L)
 		def("user_name", &user_name),
 		def("time_global", &script_time_global),
 		def("time_global_async", &script_time_global_async),
+		def("IsTracyConnected", &IsTracyConnected),
         def("add_scope_radii", &AddScope),
 #ifdef XRGAME_EXPORTS
 		def("device", &get_device),

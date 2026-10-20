@@ -1,0 +1,68 @@
+-- Lua profiling bridge for Tracy.
+
+local tracy = rawget(_G, "tracy")
+local is_connected = rawget(_G, "IsTracyConnected")
+local unpack = unpack or table.unpack
+
+local zone_depth = 0
+
+local function pack(...)
+	return { n = select("#", ...), ... }
+end
+
+local function profiler_active()
+	if not tracy then
+		return false
+	end
+
+	if is_connected then
+		return is_connected()
+	end
+
+	return true
+end
+
+local function event_name(name)
+	local info = debug.getinfo(3, "Sl")
+	if info then
+		return string.format("[LUA] %s (%s:%d)", tostring(name), info.short_src or info.source or "?", info.currentline or -1)
+	end
+
+	return "[LUA] " .. tostring(name)
+end
+
+_G.PROF_EVENT_BEGIN = function(name)
+	if name == nil or not profiler_active() then
+		return
+	end
+
+	tracy.ZoneBeginN(event_name(name))
+	zone_depth = zone_depth + 1
+end
+
+_G.PROF_EVENT_END = function()
+	if zone_depth > 0 and tracy then
+		tracy.ZoneEnd()
+		zone_depth = zone_depth - 1
+	end
+end
+
+_G.PROF_EVENT_CLOSURE = function(name, callable)
+	if type(callable) ~= "function" then
+		return nil
+	end
+
+	if name == nil or not profiler_active() then
+		return callable()
+	end
+
+	tracy.ZoneBeginN(event_name(name))
+	zone_depth = zone_depth + 1
+
+	local results = pack(callable())
+
+	tracy.ZoneEnd()
+	zone_depth = zone_depth - 1
+
+	return unpack(results, 1, results.n)
+end

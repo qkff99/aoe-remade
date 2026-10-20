@@ -31,7 +31,7 @@
 #include "lj_allocprof.h"
 #endif
 
-/* Use the existing Optick C API; ordinary and Verified builds compile this out. */
+/* Use the existing profiler C APIs; ordinary and Verified builds compile this out. */
 #if defined(XRCORE_PROFILER) && XRCORE_PROFILER == 1 && !defined(USE_VERIFY_IN_RELEASE)
 #include "../../optick-git/src/optick_capi.h"
 #include <intrin.h>
@@ -47,6 +47,13 @@
   gc_profile_event = OptickAPI_PushEvent(gc_profile_id)
 #define GC_PROFILE_END() \
   do { if (gc_profile_event) OptickAPI_PopEvent(gc_profile_event); } while (0)
+#elif defined(XRCORE_PROFILER) && XRCORE_PROFILER == 2 && !defined(USE_VERIFY_IN_RELEASE)
+#include "../../tracy-0.14.1/public/tracy/TracyC.h"
+#define GC_PROFILE_BEGIN(name) \
+  static const struct ___tracy_source_location_data gc_profile_location = { name, __FUNCTION__, __FILE__, (uint32_t)__LINE__, 0 }; \
+  TracyCZoneCtx gc_profile_event = ___tracy_emit_zone_begin(&gc_profile_location, 1)
+#define GC_PROFILE_END() \
+  ___tracy_emit_zone_end(gc_profile_event)
 #else
 #define GC_PROFILE_BEGIN(name)
 #define GC_PROFILE_END()
