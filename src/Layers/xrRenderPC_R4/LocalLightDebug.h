@@ -10,7 +10,7 @@ namespace LocalLightDebug
 extern int show;
 extern bool active;
 
-enum class Reason { Unknown, Inactive, Hud, OccqDisabled, ShadowTestDisabled, UnshadowedTestDisabled, NearCamera, GpuVisible, GpuHidden, GpuError };
+enum class Reason { Unknown, Inactive, Hud, OccqDisabled, ShadowTestDisabled, UnshadowedTestDisabled, NearCamera, GpuVisible, GpuHidden, GpuError, ViewChanged };
 void BeginFrame();
 void EndFrame();
 void RequestDump();

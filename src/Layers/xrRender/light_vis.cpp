@@ -12,6 +12,22 @@ const u32 delay_large_min = 10;
 const u32 delay_large_max = 20;
 const u32 cullfragments = 4;
 
+#if defined(USE_DX11) && RENDER == R_R4
+bool light::vis_query_current() const
+{
+    // A zero sample count only establishes occlusion for the query's camera
+    // and light volume. Jitter and weather far-plane drift do not change its rays.
+    return vis.query_view_valid &&
+        !memcmp(&vis.query_view, &Device.mView, sizeof(Fmatrix)) &&
+        !memcmp(&vis.query_world, &m_xform, sizeof(Fmatrix)) &&
+        _abs(vis.query_parameters.x - Device.mProject._11) < .001f &&
+        _abs(vis.query_parameters.y - Device.mProject._22) < .001f &&
+        vis.query_parameters.z == float(RenderScreenWidth()) &&
+        vis.query_parameters.w == float(RenderScreenHeight()) &&
+        vis.query_svp == Device.m_SecondViewport.IsSVPFrame();
+}
+#endif
+
 void light::vis_prepare()
 {
     if (int(indirect_photons) != ps_r2_GI_photons)
@@ -42,6 +58,15 @@ void light::vis_prepare()
     }
 
     u32 frame = Device.dwFrame;
+#if defined(USE_DX11) && RENDER == R_R4
+    if (!vis.visible && !vis_query_current())
+    {
+        // Preserve pending-query ownership; only revoke its old hidden answer.
+        vis.visible = true;
+        vis.frame2test = frame;
+        if (LocalLightDebug::active) LocalLightDebug::Visibility(*this, LocalLightDebug::Reason::ViewChanged);
+    }
+#endif
     if (frame < vis.frame2test)
     {
 #if defined(USE_DX11) && RENDER == R_R4
@@ -91,6 +116,14 @@ void light::vis_prepare()
         return;
 
     vis.pending = true;
+#if defined(USE_DX11) && RENDER == R_R4
+    vis.query_view = Device.mView;
+    vis.query_world = m_xform;
+    vis.query_parameters.set(Device.mProject._11, Device.mProject._22,
+        float(RenderScreenWidth()), float(RenderScreenHeight()));
+    vis.query_svp = Device.m_SecondViewport.IsSVPFrame();
+    vis.query_view_valid = true;
+#endif
     RCache.set_xform_world(m_xform);
     CHK_DX(BeginQuery(vis.Q));
     //	Hack: Igor. Light is visible if it's frutum is visible. (Only for volumetric)
@@ -115,6 +148,15 @@ void light::vis_update()
     //	. test-result:	invisible:
     //		. shedule for 'next-frame' interval
 
+#if defined(USE_DX11) && RENDER == R_R4
+    const bool current_view = vis_query_current();
+    if (flags.bActive && !vis.visible && !current_view)
+    {
+        vis.visible = true;
+        vis.frame2test = Device.dwFrame;
+        if (LocalLightDebug::active) LocalLightDebug::Visibility(*this, LocalLightDebug::Reason::ViewChanged);
+    }
+#endif
     if (!vis.pending) return;
 
     u32 frame = Device.dwFrame;
@@ -141,6 +183,14 @@ void light::vis_update()
     vis.visible = (fragments > cullfragments);
     vis.frame2test = vis.visible ? (frame + ::Random.randI(delay_large_min, delay_large_max)) : (frame + 1);
 #if defined(USE_DX11) && RENDER == R_R4
+    if (!current_view)
+    {
+        // The GPU may be several frames behind. A late zero from another view
+        // must not hide a face that the camera has already revealed.
+        vis.visible = true;
+        vis.frame2test = frame + 1;
+    }
     if (LocalLightDebug::active) LocalLightDebug::QueryResult(*this, hr, fragments);
+    if (!current_view && LocalLightDebug::active) LocalLightDebug::Visibility(*this, LocalLightDebug::Reason::ViewChanged);
 #endif
 }

@@ -134,6 +134,7 @@ const char* Name(Reason reason)
     case Reason::GpuVisible: return "gpu_samples_gt_4";
     case Reason::GpuHidden: return "gpu_samples_le_4";
     case Reason::GpuError: return "gpu_error_fail_open";
+    case Reason::ViewChanged: return "query_view_changed_fail_open";
     default: return "not_observed_enable_debug_earlier";
     }
 }

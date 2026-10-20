@@ -107,6 +107,11 @@ public:
 		bool		pending;		// test is still pending
 		u16			smap_ID;
 		float		distance;
+#if defined(USE_DX11) && RENDER == R_R4
+        Fmatrix query_view, query_world;
+        Fvector4 query_parameters;
+        bool query_view_valid = false, query_svp = false;
+#endif
 	}				vis;
 
 	union			_xform	{
@@ -199,6 +204,9 @@ public:
 	void			xform_calc				();
 	void			vis_prepare				();
 	void			vis_update				();
+#if defined(USE_DX11) && RENDER == R_R4
+    bool vis_query_current() const;
+#endif
 	void			export_					();
 	void			set_attenuation_params	(float a0, float a1, float a2, float fo);
 	void			optimize_smap_size		();
