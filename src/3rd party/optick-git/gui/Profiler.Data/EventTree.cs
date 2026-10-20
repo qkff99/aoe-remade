@@ -387,6 +387,86 @@ namespace Profiler.Data
 			Children.ForEach(node => node.ForEach(action));
 		}
 
+		public void ForEachChildInsideInterval(long start, long finish, TreeNodeDelegate action)
+		{
+			ForEachChildInsideInterval(this, start, finish, action, 0);
+		}
+
+		private static void ForEachChildInsideInterval(EventNode parent, long start, long finish, TreeNodeDelegate action, int level)
+		{
+			List<BaseTreeNode> children = parent.Children;
+			int index = Math.Max(0, FindFirstChildStartedAtOrAfter(children, start) - 1);
+
+			for (; index < children.Count; ++index)
+			{
+				EventNode node = children[index] as EventNode;
+				if (node == null)
+					continue;
+
+				if (node.Entry.Start >= finish)
+					break;
+
+				if (node.Entry.Finish <= start)
+					continue;
+
+				if (action(node, level))
+					ForEachChildInsideInterval(node, start, finish, action, level + 1);
+			}
+		}
+
+		private static int FindFirstChildStartedAtOrAfter(List<BaseTreeNode> children, long start)
+		{
+			int left = 0;
+			int right = children.Count;
+
+			while (left < right)
+			{
+				int index = (left + right) / 2;
+				EventNode node = children[index] as EventNode;
+
+				if (node != null && node.Entry.Start < start)
+					left = index + 1;
+				else
+					right = index;
+			}
+
+			return left;
+		}
+
+		public EventNode FindNodeAtLevel(long tick, int level)
+		{
+			EventNode node = this;
+
+			for (int currentLevel = 0; currentLevel <= level; ++currentLevel)
+			{
+				List<BaseTreeNode> children = node.Children;
+				int index = FindFirstChildStartedAtOrAfter(children, tick);
+
+				EventNode found = null;
+
+				if (index > 0)
+				{
+					EventNode candidate = children[index - 1] as EventNode;
+					if (candidate != null && candidate.Entry.Intersect(tick))
+						found = candidate;
+				}
+
+				if (found == null && index < children.Count)
+				{
+					EventNode candidate = children[index] as EventNode;
+					if (candidate != null && candidate.Entry.Intersect(tick))
+						found = candidate;
+				}
+
+				if (found == null)
+					return null;
+
+				node = found;
+			}
+
+			return node;
+		}
+
 		public void ApplyTags(List<Tag> tags)
 		{
 			if (tags == null || tags.Count == 0)

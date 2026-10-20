@@ -280,9 +280,11 @@ namespace Profiler.Controls
 					Draw(canvas, SyncWorkMesh, world);
 				}
 
-				Data.Utils.ForEachInsideInterval(EventData.Events, scroll.ViewTime, frame =>
+				Durable viewTime = scroll.ViewTime;
+
+				Data.Utils.ForEachInsideInterval(EventData.Events, viewTime, frame =>
 				{
-					GetTree(frame).ForEachChild((node, level) =>
+					GetTree(frame).ForEachChildInsideInterval(viewTime.Start, viewTime.Finish, (node, level) =>
 					{
 						Entry entry = (node as EventNode).Entry;
 						Interval intervalPx = scroll.TimeToPixel(entry);
@@ -381,42 +383,22 @@ namespace Profiler.Controls
 
 			int index = Data.Utils.BinarySearchExactIndex(EventData.Events, tick.Start);
 
-			EventFrame resultFrame = null;
-			EventNode resultNode = null;
-			int resultLevel = -1;
+			eventFrame = null;
+			eventNode = null;
 
-			if (index >= 0)
-			{
-				EventFrame frame = EventData.Events[index];
+			if (index < 0)
+				return -1;
 
-				int desiredLevel = (int)(point.Y / RenderParams.BaseHeight);
+			EventFrame frame = EventData.Events[index];
+			int desiredLevel = (int)(point.Y / RenderParams.BaseHeight);
 
-				GetTree(frame).ForEachChild((node, level) =>
-				{
-					if (level > desiredLevel || resultFrame != null)
-					{
-						return false;
-					}
+			EventNode node = GetTree(frame).FindNodeAtLevel(tick.Start, desiredLevel);
+			if (node == null)
+				return -1;
 
-					if (level == desiredLevel)
-					{
-						EventNode evNode = (node as EventNode);
-						if (evNode.Entry.Intersect(tick.Start))
-						{
-							resultFrame = frame;
-							resultNode = evNode;
-							resultLevel = level;
-							return false;
-						}
-					}
-
-					return true;
-				});
-			}
-
-			eventFrame = resultFrame;
-			eventNode = resultNode;
-			return resultLevel;
+			eventFrame = frame;
+			eventNode = node;
+			return desiredLevel;
 		}
 
 		public override void OnMouseMove(Point point, ThreadScroll scroll)
