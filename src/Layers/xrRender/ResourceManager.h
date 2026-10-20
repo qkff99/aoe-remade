@@ -121,6 +121,8 @@ public:
 
 	// Low level resource creation
 	ref_texture _CreateTexture(LPCSTR Name);
+    void QueueTextureLoad(const ref_texture& texture);
+    void WaitForTextureLoads();
     void PrefetchTexture(LPCSTR name);
     // creationGuard must protect the map entry while acquiring a live reference.
     static ref_texture AcquireTexture(CTexture* texture);

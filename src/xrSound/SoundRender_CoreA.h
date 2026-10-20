@@ -23,6 +23,8 @@ class CSoundRender_CoreA : public CSoundRender_Core
 	ALCdevice* pDevice;
 	ALCcontext* pContext;
 	ALDeviceList* pDeviceList;
+	xr_string backend_device_name;
+	u32 device_revision = 0;
 
 	struct SListener
 	{
@@ -95,6 +97,8 @@ public:
 	virtual void refresh_devices() override;
 	virtual void default_device_changed() override;
 	virtual void switch_device(LPCSTR device_name) override;
+	u32 DeviceRevision() const { return device_revision; }
+	void CopyDeviceState(xr_string& name, xr_vector<xr_string>& names) const;
 
 	virtual void set_master_volume(float f);
 

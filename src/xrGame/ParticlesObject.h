@@ -2,6 +2,7 @@
 #define ParticlesObjectH
 
 #include "../xrEngine/PS_instance.h"
+#include "../Include/xrRender/ParticleCustom.h"
 
 extern const Fvector zero_vel;
 
@@ -12,13 +13,17 @@ class CParticlesObject : public CPS_Instance
 
 	void Init(LPCSTR p_name, IRender_Sector* S, BOOL bAutoRemove);
 	void UpdateSpatial();
+    void StageRenderState();
+    mutable xrCriticalSection simulation_lock;
+    xrCriticalSection snapshot_lock;
+    IParticleCustom::RenderStatePtr pending_frame;
+    Fmatrix simulation_xform, pending_xform;
+    Fvector simulation_position;
 
 protected:
 	bool m_bLooped; //флаг, что система зациклена
 	bool m_bStopping; //вызвана функция Stop()
 
-	bool NeedUpdate = false;
-	
 public:
 	virtual ~CParticlesObject();
 	CParticlesObject(LPCSTR p_name, BOOL bAutoRemove, bool destroy_on_game_load);
@@ -26,12 +31,14 @@ public:
 	virtual bool shedule_Needed() { return true; };
 	virtual float shedule_Scale();
 	virtual void Update(u32 dt) override;
+    void Simulate(u32 dt) override;
+    bool PublishRenderState() override;
 	virtual void renderable_Render(IDSGraphManager* DM);
 	void PerformAllTheWork();
 
-	Fvector& Position();
+	Fvector Position();
 	void SetXFORM(const Fmatrix& m);
-	IC Fmatrix& XFORM() { return renderable.xform; }
+	Fmatrix XFORM() const { xrCriticalSectionGuard guard(&simulation_lock); return simulation_xform; }
 	void UpdateParent(const Fmatrix& m, const Fvector& vel);
 
 	void play_at_pos(const Fvector& pos, BOOL xform = FALSE);

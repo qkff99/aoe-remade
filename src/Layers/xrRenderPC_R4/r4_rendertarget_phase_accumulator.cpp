@@ -17,6 +17,36 @@ void CRenderTarget::bind_recorded_accumulator()
     // No shared target dimensions, clear marks or light-marker state are changed.
 }
 
+bool CRenderTarget::supports_static_light_receiver(const light& source) const
+{
+    const bool spot = source.flags.type == IRender_Light::SPOT;
+    const auto& standard = spot ? s_accum_spot : s_accum_point;
+    if (!standard) return false;
+    const u32 index = source.X.S.size == RImplementation.o.smapsize ? SE_L_FULLSIZE : SE_L_NORMAL;
+    const auto& custom = spot ? source.s_spot : source.s_point;
+    const auto& shader = custom ? custom : standard;
+    const auto* element = shader->E[index]._get();
+    const auto* expected = standard->E[index]._get();
+    // Require a known native pass before applying its receiver predicate.
+    if (!element || !expected || element->passes.size() != 1 || expected->passes.size() != 1) return false;
+    const auto& pass = element->passes[0];
+    const auto& native = expected->passes[0];
+    // Spot cookies multiply the same native lighting potential. Different cookie
+    // textures are supported; different programs, state or handlers are not.
+    if (spot)
+    {
+        if (!pass || !native || pass->vs != native->vs || pass->ps != native->ps ||
+            pass->state != native->state || pass->constants != native->constants || pass->gs != native->gs ||
+            pass->hs != native->hs || pass->ds != native->ds) return false;
+    }
+    else if (pass._get() != native._get()) return false;
+    const char* prefix = spot ? (index == SE_L_FULLSIZE ? "accum_spot_fullsize_nomsaa" : "accum_spot_normal_nomsaa") :
+        "accum_omni_normal_nomsaa";
+    return pass && pass->ps && pass->constants &&
+        strstr(pass->ps->cName.c_str(), prefix) == pass->ps->cName.c_str() &&
+        pass->constants->get("ssfx_shadow_bias") && pass->constants->get("pos_decompression_params");
+}
+
 bool CRenderTarget::prepare_light_accumulation(RecordedLight& result, light& source, bool point)
 {
     auto& renderer = RImplementation;

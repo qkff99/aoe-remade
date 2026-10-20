@@ -662,12 +662,7 @@ ref_texture CResourceManager::_CreateTexture(LPCSTR _Name)
 		T->Preload();
 		if (Device.b_is_Ready)
 		{
-            const DWORD owner_thread = GetCurrentThreadId();
-            textures_load_tasks.run([texture, owner_thread]()
-            {
-                PROF_THREAD_IF(owner_thread != GetCurrentThreadId(), "X-Ray PPL Thread");
-                texture->Load();
-            });
+            QueueTextureLoad(texture);
 		}
 		return texture;
 	}

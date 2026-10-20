@@ -65,6 +65,19 @@ typedef int (*lua_Writer) (lua_State *L, const void* p, size_t sz, void* ud);
 */
 typedef void * (*lua_Alloc) (void *ud, void *ptr, size_t osize, size_t nsize);
 
+typedef unsigned long long (*lua_XRayGCTickFunction) (void);
+typedef struct lua_XRayGCAtomicProfile {
+  unsigned long long sequence;
+  unsigned long long total_ticks;
+  unsigned long long roots_ticks;
+  unsigned long long grayagain_ticks;
+  unsigned long long separateudata_ticks;
+  unsigned long long mmudata_ticks;
+  unsigned long long weak_sweep_ticks;
+  unsigned long long userdata_scanned;
+  unsigned long long userdata_candidates;
+} lua_XRayGCAtomicProfile;
+
 
 /*
 ** basic types
@@ -233,6 +246,8 @@ LUA_API int lua_gcstep_one(lua_State *L, int data);
 LUA_API void lua_gcincremental(lua_State *L, int enabled);
 LUA_API int lua_gc_resume_automatic(lua_State *L);
 LUA_API const void* lua_vmidentity(lua_State *L);
+LUA_API void lua_xray_gc_atomic_profile_configure(lua_State *L, lua_XRayGCTickFunction clock);
+LUA_API int lua_xray_gc_atomic_profile_snapshot(lua_State *L, lua_XRayGCAtomicProfile *profile);
 /* Failure-only snapshot. Sizes are bytes; kind 1=realloc, 2=new GC object. */
 typedef struct lua_XRayMemoryError {
   unsigned long long sequence;

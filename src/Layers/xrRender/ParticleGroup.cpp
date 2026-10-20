@@ -402,7 +402,7 @@ void CParticleGroup::SItem::OnFrame(u32 u_dt, const CPGDef::SEffect& def, Fbox& 
 		if (E->IsPlaying())
 		{
 			bPlaying = true;
-			if (E->vis.box.is_valid()) box.merge(E->vis.box);
+			if (E->SimulationBounds().is_valid()) box.merge(E->SimulationBounds());
 			if (def.m_Flags.is(CPGDef::SEffect::flOnPlayChild) && def.m_OnPlayChildName.size())
 			{
 				PAPI::Particle* particles;
@@ -438,7 +438,7 @@ void CParticleGroup::SItem::OnFrame(u32 u_dt, const CPGDef::SEffect& def, Fbox& 
 				if (E->IsPlaying())
 				{
 					bPlaying = true;
-					if (E->vis.box.is_valid()) box.merge(E->vis.box);
+					if (E->SimulationBounds().is_valid()) box.merge(E->SimulationBounds());
 				}
 				else
 				{
@@ -462,7 +462,7 @@ void CParticleGroup::SItem::OnFrame(u32 u_dt, const CPGDef::SEffect& def, Fbox& 
 				if (E->IsPlaying())
 				{
 					bPlaying = true;
-					if (E->vis.box.is_valid()) box.merge(E->vis.box);
+					if (E->SimulationBounds().is_valid()) box.merge(E->SimulationBounds());
 				}
 				else
 				{
@@ -550,7 +550,9 @@ CParticleGroup::CParticleGroup()
 CParticleGroup::~CParticleGroup()
 {
 	xrCriticalSectionGuard guard(&onframe_lock);
-	// Msg ("!!! destoy PG");
+	published_frame.reset();
+	frame_buffers[0].reset();
+	frame_buffers[1].reset();
 	for (u32 i = 0; i < items.size(); i++) items[i].Clear();
 	items.clear();
 }
@@ -614,16 +616,52 @@ void CParticleGroup::OnFrame(u32 u_dt)
 
 		if (box.is_valid())
 		{
-			vis.box.set(box);
-			vis.box.getsphere(vis.sphere.P, vis.sphere.R);
+			simulation_bounds.set(box);
 		}
 	}
 	else
 	{
-		vis.box.set(m_InitialPosition, m_InitialPosition);
-		vis.box.grow(EPS_L);
-		vis.box.getsphere(vis.sphere.P, vis.sphere.R);
+		simulation_bounds.set(m_InitialPosition, m_InitialPosition);
+		simulation_bounds.grow(EPS_L);
 	}
+#ifdef _EDITOR
+    PublishRenderState(CaptureRenderState());
+#endif
+}
+
+IParticleCustom::RenderStatePtr CParticleGroup::CaptureRenderState()
+{
+	PROF_EVENT("Particles.Group.Snapshot");
+	xrCriticalSection::raii guard(&onframe_lock);
+	auto& slot = frame_buffers[next_frame_buffer++ % 2];
+	if (!slot || slot.use_count() != 1) slot = std::make_shared<GroupFrame>();
+	// Release old child tokens before selecting the children's writable slots.
+	slot->children.clear();
+	slot->bounds = simulation_bounds;
+	const auto capture = [&](dxRender_Visual* visual)
+	{
+		if (!visual) return;
+		auto* child = static_cast<dxParticleCustom*>(visual);
+		slot->children.push_back({intrusive_ptr<dxParticleCustom>(child), child->CaptureRenderState()});
+	};
+	for (auto& item : items)
+	{
+		capture(item._effect);
+		for (auto* child : item._children_related) capture(child);
+		for (auto* child : item._children_free) capture(child);
+	}
+	return slot;
+}
+
+void CParticleGroup::PublishRenderState(const RenderStatePtr& state)
+{
+	published_frame = std::static_pointer_cast<const GroupFrame>(state);
+	// Publish the exact children paired with these bounds, never their newer pending states.
+	for (const auto& child : published_frame->children) child.visual->PublishRenderState(child.state);
+	vis.box = published_frame->bounds;
+	for (const auto& child : published_frame->children)
+		vis.box.merge(child.visual->vis.box);
+	vis.box.getsphere(vis.sphere.P, vis.sphere.R);
 }
 
 void CParticleGroup::UpdateParent(const Fmatrix& m, const Fvector& velocity, BOOL bXFORM)

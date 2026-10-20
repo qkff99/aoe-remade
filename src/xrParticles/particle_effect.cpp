@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "particle_effect.h"
 
 using namespace PAPI;
@@ -89,6 +89,7 @@ BOOL ParticleEffect::Add(const pVector& pos, const pVector& posB,
 	P.age = age;
 	P.frame = frame;
 	P.flags.assign(flags);
+	P.render_id = ++next_render_id;
 
 	if (b_cb)
 		b_cb(owner, param, P, p_count);

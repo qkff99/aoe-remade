@@ -228,7 +228,7 @@ void CRender::Render()
 		GMBase.r_dsgraph_capture_lights();
 	}
 
-    if (!local_light_shadows && (ps_r4_mt_local_shadows || ps_r4_smapvis))
+    if (!local_light_shadows && (ps_r4_mt_local_shadows || ps_r4_smapvis || ps_r4_static_light_cache))
         local_light_shadows = std::make_unique<LocalLightShadows>();
     if (local_light_shadows) local_light_shadows->BeginFrame(LP_normal);
 
@@ -245,6 +245,8 @@ void CRender::Render()
 		if (Details) Details->Render();
 		Target->phase_scene_end();
 	}
+
+    if (local_light_shadows) local_light_shadows->TestReceivers();
 
     if (sun_shadows)
     {
@@ -437,7 +439,6 @@ void CRender::render_forward()
 		phase = PHASE_NORMAL;
 		//	Igor: we don't want to render old lods on next frame.
 		GMBase.r_dsgraph_render_static(1); // normal level, secondary priority
-		CParticlesAsync::Wait();
 		GMBase.r_dsgraph_render_dynamic(1);
 		GMBase.fade_render(); // faded-portals
 		GMBase.r_dsgraph_render_sorted(false); // strict-sorted geoms

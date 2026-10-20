@@ -33,16 +33,20 @@ public:
     void __stdcall apply_gif(u32 stage);
 	void __stdcall apply_normal(u32 stage);
 
-	void Preload();
-	void Load();
+	void Bind(u32 stage);
+    void Preload();
+	void Load(bool renderReady = false);
 	void PostLoad();
 	void Unload(void);
+    bool BeginLoadRequest() { return !loadQueued.exchange(true, std::memory_order_acq_rel); }
+    void EndLoadRequest() { loadQueued.store(false, std::memory_order_release); }
+    bool IsLoading() const { return loadQueued.load(std::memory_order_acquire); }
 	//	void								Apply			(u32 dwStage);
 
 	void surface_set(ID3DBaseTexture* surf);
 	ID3DBaseTexture* surface_get();
 
-	IC BOOL isUser() { return flags.bUser; }
+	IC BOOL isUser() { xrCriticalSectionGuard guard(cs); return flags.bUser; }
 	IC u32 get_Width()
 	{
 		desc_enshure();
@@ -73,13 +77,19 @@ public:
 	virtual ~CTexture();
 
 #if defined(USE_DX10) || defined(USE_DX11)
-	ID3DShaderResourceView*				get_SRView() {return m_pSRView;}
+	ID3DShaderResourceView*				get_SRView() { xrCriticalSectionGuard guard(cs); if (!flags.bLoaded) Load(); return m_pSRView; }
+    ID3DShaderResourceView* RenderView();
 #endif	//	USE_DX10
 
 private:
-	IC void wait_for_loading() const { while (flags.bLoading){SwitchToThread();} }
+	IC void wait_for_loading() const
+    {
+#ifndef USE_DX11
+        while (flags.bLoading) SwitchToThread();
+#endif
+    }
 	IC BOOL desc_valid() { wait_for_loading(); return pSurface==desc_cache; }
-	IC void desc_enshure() { wait_for_loading(); if (!desc_valid()) desc_update(); }
+	IC void desc_enshure() { xrCriticalSectionGuard guard(cs); if (!flags.bLoaded) Load(); if (!desc_valid()) desc_update(); }
 	void desc_update();
 #if defined(USE_DX10) || defined(USE_DX11)
 	void								Apply			(u32 dwStage);
@@ -121,7 +131,10 @@ public: //	Public class members (must be encapsulated furthur)
 	};
 
 private:
-	ID3DBaseTexture* pSurface;
+	xrCriticalSection cs;
+    std::atomic<bool> loadQueued{false};
+    bool streamable = false;
+    ID3DBaseTexture* pSurface;
 	// Sequence data
 	xr_vector<ID3DBaseTexture*> seqDATA;
 
@@ -143,8 +156,8 @@ struct resptrcode_texture : public resptr_base<CTexture>
 {
 	void create(LPCSTR _name);
 	void destroy() { _set(NULL); }
-	shared_str bump_get() { while (_get() && _get()->flags.bLoading) { SwitchToThread(); }return _get()->m_bumpmap; }
-	bool bump_exist() { while (_get() && _get()->flags.bLoading) { SwitchToThread(); }return 0!=bump_get().size(); }
+	shared_str bump_get() { return _get() ? _get()->m_bumpmap : shared_str(); }
+	bool bump_exist() { return 0 != bump_get().size(); }
 };
 
 typedef resptr_core<CTexture, resptrcode_texture>

@@ -48,6 +48,7 @@ enum {
 
 /* Collector. */
 LJ_FUNC size_t lj_gc_separateudata(global_State *g, int all);
+LJ_FUNC void lj_gc_udata_link(global_State *g, GCobj *o);
 LJ_FUNC void lj_gc_finalize_udata(lua_State *L);
 #if LJ_HASFFI
 LJ_FUNC void lj_gc_finalize_cdata(lua_State *L);

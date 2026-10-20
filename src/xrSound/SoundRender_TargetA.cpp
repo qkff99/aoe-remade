@@ -69,12 +69,17 @@ void CSoundRender_TargetA::start(CSoundRender_Emitter* E)
 
 	// Calc storage
 	buf_block = sdef_target_block * E->source()->m_wformat.nAvgBytesPerSec / 1000;
-	g_target_temp_data.resize(buf_block);
-	g_target_temp_data_16.resize(buf_block * 2);
 }
 
 void CSoundRender_TargetA::render()
 {
+	const u32 block = m_pEmitter->source()->m_wformat.nChannels == 1
+		? u32(g_target_temp_data.size()) : u32(g_target_temp_data_16.size());
+	if (!m_pEmitter->prepare_data(block * sdef_target_count))
+	{
+		PROF_EVENT("Sound.Start.WaitingForPCM");
+		return;
+	}
 	for (u32 buf_idx = 0; buf_idx < sdef_target_count; buf_idx++)
 		fill_block(pBuffers[buf_idx]);
 
@@ -110,15 +115,16 @@ void CSoundRender_TargetA::rewind()
 
 	A_CHK(alSourceStop(pSource));
 	A_CHK(alSourcei (pSource, AL_BUFFER, NULL));
-	for (u32 buf_idx = 0; buf_idx < sdef_target_count; buf_idx++)
-		fill_block(pBuffers[buf_idx]);
-	A_CHK(alSourceQueueBuffers (pSource, sdef_target_count, pBuffers));
-	A_CHK(alSourcePlay (pSource));
+	rendering = FALSE;
+	render();
 }
 
 void CSoundRender_TargetA::update()
 {
 	inherited::update();
+	const u32 block = m_pEmitter->source()->m_wformat.nChannels == 1
+		? u32(g_target_temp_data.size()) : u32(g_target_temp_data_16.size());
+	m_pEmitter->prepare_data(block * sdef_target_count); // Decode ahead of the playback cursor.
 
 	ALint processed;
 	// Get status
@@ -128,6 +134,11 @@ void CSoundRender_TargetA::update()
 	{
 		while (processed)
 		{
+			if (!m_pEmitter->prepare_data(block))
+			{
+				PROF_EVENT("Sound.Refill.WaitingForPCM");
+				break; // Keep the AL buffer queued; no cursor advance or blocking read.
+			}
 			ALuint BufferID;
 			A_CHK(alSourceUnqueueBuffers(pSource, 1, &BufferID));
 			fill_block(BufferID);
@@ -178,7 +189,7 @@ void CSoundRender_TargetA::fill_parameters()
 	VERIFY2(m_pEmitter, SE->source()->file_name());
 	A_CHK(alSourcei (pSource, AL_SOURCE_RELATIVE, m_pEmitter->b2D));
 
-	A_CHK(alSourcef (pSource, AL_ROLLOFF_FACTOR, psSoundRolloff));
+	A_CHK(alSourcef (pSource, AL_ROLLOFF_FACTOR, SoundRender->runtime.psSoundRolloff));
 
 	VERIFY2(m_pEmitter, SE->source()->file_name());
 	float _gain = m_pEmitter->smooth_volume;
@@ -193,9 +204,9 @@ void CSoundRender_TargetA::fill_parameters()
 	float _pitch = m_pEmitter->p_source.freq;
 	clamp(_pitch, EPS_L, 2.f);
 
-	if (!fsimilar(cache_pitch, _pitch * psSpeedOfSound))
+	if (!fsimilar(cache_pitch, _pitch * SoundRender->runtime.psSpeedOfSound))
 	{
-		cache_pitch = _pitch * psSpeedOfSound;
+		cache_pitch = _pitch * SoundRender->runtime.psSpeedOfSound;
 
 		// Only update time to stop for non-looped sounds
 		if (!m_pEmitter->iPaused && (m_pEmitter->m_current_state == CSoundRender_Emitter::stStarting || m_pEmitter->m_current_state == CSoundRender_Emitter::stPlaying || m_pEmitter->m_current_state == CSoundRender_Emitter::stSimulating))

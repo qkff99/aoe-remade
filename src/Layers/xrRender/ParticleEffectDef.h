@@ -41,7 +41,7 @@ namespace PS
 			m_fSpeed = 24.f;
 		}
 
-		IC void CalculateTC(int frame, Fvector2& lt, Fvector2& rb)
+		IC void CalculateTC(int frame, Fvector2& lt, Fvector2& rb) const
 		{
 			lt.x = (float)((frame % m_iFrameDimX) * m_fTexSize.x);
 			lt.y = (float)((frame / m_iFrameDimX) * m_fTexSize.y);

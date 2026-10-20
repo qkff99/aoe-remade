@@ -3,6 +3,7 @@
 #include "LocalLightDebug.h"
 #include "LocalShadowVisibility.h"
 #include "RenderContext.h"
+#include "LocalLightDepthCache.h"
 #include "../xrRender/FVisual.h"
 #include "../xrRender/FTreeVisual.h"
 #include "../xrRender/FSkinned.h"
@@ -55,6 +56,8 @@ struct ShadowCache
     D3D11_VIEWPORT viewport{};
     u32 selected = no_index, generation = 0, queue_revision = 0;
     bool recorded = false;
+    std::unique_ptr<local_light_depth::Tile> depth_tile;
+    u32 seen_frame = 0;
 
     void ResetVisibility()
     {
@@ -201,10 +204,23 @@ std::unique_ptr<ShadowCache> PrepareCache(light& source)
     return cache;
 }
 
+bool ReceiverSourceKnown(const light& source)
+{
+    if (!source.flags.bActive || (source.flags.type != IRender_Light::OMNIPART && source.flags.type != IRender_Light::SPOT) ||
+        source.flags.bHudMode ||
+        (source.flags.bVolumetric && RImplementation.o.advancedpp && ps_r2_ls_flags.test(R2FLAG_VOLUMETRIC_LIGHTS)) ||
+        !source.flags.bOccq || !source.indirect.empty() ||
+        RImplementation.o.dx10_msaa || ps_r2_ls_flags.test(R2FLAG_GI) ||
+        ps_r2_ls_flags.test(R2FLAG_EXP_DONT_TEST_SHADOWED) || !_valid(source.range) || source.range <= EPS_L) return false;
+    return RImplementation.Target->supports_static_light_receiver(source);
+}
+
 struct LightShadowJob
 {
     light* source = nullptr;
     ShadowCache* cache = nullptr;
+    bool cache_depth = false, depth_hit = false, depth_built = false, receiver_hidden = false;
+    Fmatrix receiver_transform;
     CFrustum frustum;
     xr_vector<ISpatialShared> candidates;
     std::vector<Fmatrix> worlds;
@@ -256,8 +272,9 @@ void SetShadowView(light& source, ID3D11DepthStencilView* depth)
     RCache.set_xform_project(source.X.S.project);
 }
 
-void RecordLight(LightShadowJob& job, ID3D11DepthStencilView* depth)
+void RecordLight(LightShadowJob& job, ShadowMap& map, local_light_depth::Copier& copier)
 {
+    auto* depth = map.Depth();
     auto& graph = job.source->GMLight;
     struct GraphScope
     {
@@ -266,12 +283,39 @@ void RecordLight(LightShadowJob& job, ID3D11DepthStencilView* depth)
     } graph_scope{graph};
     graph.shadow_execution = 1;
     SetShadowView(*job.source, depth);
+    bool immutable_drawn = false;
+    if (job.cache_depth)
+    {
+        auto& tile = *job.cache->depth_tile;
+        const auto& source = *job.source;
+        if (tile.valid && copier.Transfer(tile, source, map, false))
+        {
+            job.depth_hit = true;
+        }
+        else
+        {
+            graph.shadow_static_subset = 1;
+            graph.r_dsgraph_render_static(0, false);
+            if (copier.Transfer(tile, source, map, true))
+            {
+                tile.written = true;
+                job.depth_built = true;
+            }
+        }
+        RCache.ResetBindings();
+        SetShadowView(*job.source, depth);
+        immutable_drawn = true;
+    }
     // Learn occlusion only against immutable opaque depth. The original graph
     // renderer still selects complete native shadow batches for this subset.
     if (job.cache && job.cache->selected != no_index)
     {
-        graph.shadow_static_subset = 1;
-        graph.r_dsgraph_render_static(0, false);
+        if (!immutable_drawn)
+        {
+            graph.shadow_static_subset = 1;
+            graph.r_dsgraph_render_static(0, false);
+            immutable_drawn = true;
+        }
         auto& cache = *job.cache;
         const auto& draw = cache.draws[cache.selected];
         const auto& pass = cache.passes[draw.pass];
@@ -294,8 +338,8 @@ void RecordLight(LightShadowJob& job, ID3D11DepthStencilView* depth)
         // alpha-tested or dynamic passes through a stale state-cache entry.
         RCache.ResetBindings();
         SetShadowView(*job.source, depth);
-        graph.shadow_static_subset = 2;
     }
+    graph.shadow_static_subset = immutable_drawn ? 2 : 0;
     graph.r_dsgraph_render_static(0, false);
     graph.shadow_static_subset = 0;
     graph.r_dsgraph_render_dynamic(0, false);
@@ -306,8 +350,15 @@ void RecordLight(LightShadowJob& job, ID3D11DepthStencilView* depth)
 
 struct LocalLightShadows::State
 {
+    struct SpotReceiver
+    {
+        local_light_depth::ReceiverQueries queries;
+        Fvector position{}, direction{};
+        float range = 0.f, cone = 0.f;
+    };
     static constexpr u32 lanes = 4;
     std::map<light*, std::unique_ptr<ShadowCache>> caches;
+    std::map<light*, SpotReceiver> spot_receivers;
     std::vector<std::unique_ptr<LightShadowJob>> lights;
     std::vector<ShadowAtlasJob> atlases;
     std::vector<LightBlock> blocks;
@@ -321,6 +372,73 @@ struct LocalLightShadows::State
     bool initialized = false, supported = false, querying = false, recording = false, ready = false;
     bool visibility = true, parallel = true;
     u32 rejected = 0;
+    bool cache_depth = false;
+    local_light_depth::Receiver receivers;
+    local_light_depth::Copier depth_copiers[lanes];
+    bool copies_attempted = false, copies_ready = false;
+    Fmatrix receiver_camera, receiver_projection;
+    Fvector3 receiver_bias, receiver_position, receiver_direction, receiver_top;
+    Fvector2 receiver_depth;
+    Fvector4 receiver_dimensions, receiver_upscaler;
+    u64 receiver_generation = 0;
+    u32 receiver_frame = 0, receiver_age = 0;
+    bool receiver_view_valid = false;
+    u32 receiver_tests = 0, receiver_polled = 0, receiver_ready = 0, receiver_hidden = 0;
+    u32 receiver_pending = 0, receiver_full = 0, receiver_spots = 0, receiver_reset = 0;
+
+    void ReserveDepth()
+    {
+        size_t bytes = 0;
+        for (auto& entry : caches)
+        {
+            if (!ps_r4_static_light_cache) entry.second->depth_tile.reset();
+            if (entry.second->depth_tile) bytes += entry.second->depth_tile->Bytes();
+        }
+        if (!cache_depth) return;
+        if (!copies_attempted)
+        {
+            copies_attempted = true;
+            copies_ready = true;
+            for (auto& copier : depth_copiers) copies_ready = copier.Initialize() && copies_ready;
+        }
+        if (!copies_ready) return;
+        std::vector<LightShadowJob*> order;
+        for (auto& job : lights) if (job->cache && !job->cache->draws.empty()) order.push_back(job.get());
+        std::stable_sort(order.begin(), order.end(), [](const LightShadowJob* a, const LightShadowJob* b)
+        {
+            return a->cache->draws.size() > b->cache->draws.size();
+        });
+        for (auto* job : order)
+        {
+            auto& cache = *job->cache;
+            if (cache.depth_tile && !cache.depth_tile->Matches(*job->source))
+            {
+                bytes -= cache.depth_tile->Bytes();
+                cache.depth_tile.reset();
+            }
+            if (!cache.depth_tile)
+            {
+                const size_t needed = size_t(job->source->X.S.size) * job->source->X.S.size * sizeof(float);
+                for (auto& entry : caches)
+                {
+                    if (bytes + needed <= local_light_depth::budget_bytes) break;
+                    if (entry.second->seen_frame != Device.dwFrame && entry.second->depth_tile)
+                    {
+                        bytes -= entry.second->depth_tile->Bytes();
+                        entry.second->depth_tile.reset();
+                    }
+                }
+                if (bytes + needed > local_light_depth::budget_bytes) continue;
+                auto tile = std::make_unique<local_light_depth::Tile>();
+                if (!tile->Initialize(*job->source)) continue;
+                bytes += tile->Bytes();
+                cache.depth_tile = std::move(tile);
+            }
+            cache.depth_tile->written = false;
+            job->cache_depth = true;
+        }
+        PROF_TAG("Static light depth MiB", u32(bytes / (1024 * 1024)));
+    }
 
     bool Initialize()
     {
@@ -409,7 +527,7 @@ struct LocalLightShadows::State
                 context.DeviceContext()->ClearDepthStencilView(maps[lane].Depth(), D3D11_CLEAR_DEPTH, 1.f, 0);
                 for (auto* job : atlas.lights)
                 {
-                    RecordLight(*job, maps[lane].Depth());
+                    RecordLight(*job, maps[lane], depth_copiers[lane]);
                     if (job->cache)
                     {
                         for (const auto bit : job->cache->visibility.hidden) hidden += bit != 0;
@@ -487,7 +605,7 @@ void LocalLightShadows::BeginFrame(light_Package& package)
 {
     EndFrame();
     PROF_EVENT("Render.LocalShadows.PrepareFrame");
-    const bool enabled = ps_r4_mt_local_shadows || ps_r4_smapvis;
+    const bool enabled = ps_r4_mt_local_shadows || ps_r4_smapvis || ps_r4_static_light_cache;
     if (!enabled || RImplementation.o.Tshadows || !state->Initialize())
     {
         for (auto& cache : state->caches) cache.second->ResetVisibility();
@@ -497,6 +615,11 @@ void LocalLightShadows::BeginFrame(light_Package& package)
         return;
     }
     state->parallel = ps_r4_mt_local_shadows != 0;
+    state->cache_depth = ps_r4_static_light_cache != 0 && !Device.m_SecondViewport.IsSVPFrame();
+    state->receiver_tests = state->receiver_polled = state->receiver_ready = state->receiver_hidden = 0;
+    state->receiver_age = 0;
+    state->receiver_pending = state->receiver_full = state->receiver_spots = state->receiver_reset = 0;
+    if (!ps_r4_static_light_cache) state->spot_receivers.clear();
     if (state->visibility != bool(ps_r4_smapvis))
     {
         for (auto& cache : state->caches) cache.second->ResetVisibility();
@@ -562,6 +685,7 @@ void LocalLightShadows::BeginFrame(light_Package& package)
                 auto& cache = state->caches[&item];
                 if (!cache || !cache->Current(item)) cache = PrepareCache(item);
                 cache->UpdateView(item);
+                cache->seen_frame = Device.dwFrame;
                 cache->selected = no_index;
                 if (state->visibility && !cache->draws.empty())
                 {
@@ -595,6 +719,7 @@ void LocalLightShadows::BeginFrame(light_Package& package)
         R_ASSERT2(!atlas.lights.empty(), "A light shadow map does not fit the atlas");
         ++atlas_id;
     }
+    state->ReserveDepth();
     RImplementation.phase = saved_phase;
     for (u32 lane = 0; lane < State::lanes; ++lane)
     {
@@ -603,6 +728,115 @@ void LocalLightShadows::BeginFrame(light_Package& package)
         else state->Query(lane);
     }
     state->querying = true;
+}
+
+void LocalLightShadows::TestReceivers()
+{
+    if (Device.m_SecondViewport.IsSVPFrame()) return;
+    if (ps_r4_static_light_cache < 2 || !state->cache_depth || !state->querying)
+    {
+        state->receiver_view_valid = false;
+        return;
+    }
+    if (state->receiver_view_valid && state->receiver_frame == Device.dwFrame) return;
+    D3D11_TEXTURE2D_DESC position{};
+    RImplementation.Target->rt_Position->pSurface->GetDesc(&position);
+    if (position.Format != DXGI_FORMAT_R16G16B16A16_FLOAT || position.SampleDesc.Count != 1)
+    {
+        state->receiver_view_valid = false;
+        return;
+    }
+    PROF_EVENT("Render.LocalLights.ReceiverTest");
+    const Fvector4 dimensions = CalculatePositionDecompressionDimensions();
+    const Fvector4 upscaler = CalculateUpscalerParameters();
+    // Packed receiver positions contain linear view depth. Weather changes the
+    // projection's far-plane terms without changing its screen-space rays.
+    // Camera FOV/aspect interpolation also introduces float rounding. Use the
+    // same focal-scale tolerance as the existing PiP temporal history.
+    const bool projection_changed = state->receiver_view_valid &&
+        (_abs(state->receiver_projection._11 - Device.mProject._11) >= .001f ||
+            _abs(state->receiver_projection._22 - Device.mProject._22) >= .001f);
+    // Use the upscaler's existing camera-cut limits. Normal view motion keeps
+    // one-frame feedback; jitter is deliberately not a history invalidation.
+    const bool reset = !state->receiver_view_valid || u32(Device.dwFrame - state->receiver_frame) > 2 ||
+        Device.vCameraPosition.distance_to_sqr(state->receiver_position) > 25.f ||
+        Device.vCameraDirection.dotproduct(state->receiver_direction) < .5f ||
+        Device.vCameraTop.dotproduct(state->receiver_top) < .5f ||
+        projection_changed ||
+        memcmp(&state->receiver_dimensions, &dimensions, sizeof(dimensions)) ||
+        memcmp(&state->receiver_upscaler, &upscaler, sizeof(upscaler)) ||
+        memcmp(&state->receiver_bias, &ps_ssfx_shadow_bias, sizeof(Fvector3)) ||
+        state->receiver_depth.x != ps_r2_ls_depth_scale || state->receiver_depth.y != ps_r2_ls_depth_bias;
+    if (reset) ++state->receiver_generation;
+    state->receiver_reset = reset;
+    PROF_TAG("Receiver history reset", u32(reset));
+    PROF_TAG("Receiver projection changed", u32(projection_changed));
+    state->receiver_view_valid = true;
+    state->receiver_frame = Device.dwFrame;
+    state->receiver_camera = Device.mFullTransform;
+    state->receiver_projection = Device.mProject;
+    state->receiver_position = Device.vCameraPosition;
+    state->receiver_direction = Device.vCameraDirection;
+    state->receiver_top = Device.vCameraTop;
+    state->receiver_dimensions = dimensions;
+    state->receiver_upscaler = upscaler;
+    state->receiver_bias = ps_ssfx_shadow_bias;
+    state->receiver_depth.set(ps_r2_ls_depth_scale, ps_r2_ls_depth_bias);
+    bool begun = false;
+    u32 hidden_results = 0;
+    for (const auto& job : state->lights)
+    {
+        const auto& source = *job->source;
+        if (!ReceiverSourceKnown(source)) continue;
+        const local_light_depth::Tile* tile = nullptr;
+        local_light_depth::ReceiverQueries* tests = nullptr;
+        if (source.flags.type == IRender_Light::SPOT)
+        {
+            auto& spot = state->spot_receivers[job->source];
+            // Ordinary beam movement uses the same delayed feedback as camera
+            // motion. A teleport, abrupt turn or changed beam shape starts fresh.
+            if (spot.range != source.range || spot.cone != source.cone ||
+                spot.position.distance_to_sqr(source.position) > 25.f || spot.direction.dotproduct(source.direction) < .5f)
+                spot.queries = {};
+            spot.position = source.position;
+            spot.direction = source.direction;
+            spot.range = source.range;
+            spot.cone = source.cone;
+            tests = &spot.queries;
+            if (job->cache_depth && job->cache->depth_tile->valid) tile = job->cache->depth_tile.get();
+        }
+        else
+        {
+            if (!job->cache_depth || !job->cache->depth_tile->valid) continue;
+            tile = job->cache->depth_tile.get();
+            tests = job->cache->depth_tile.get();
+        }
+        u32 polls = 0, ready = 0;
+        job->receiver_hidden = tests->Resolve(Device.dwFrame, state->receiver_generation, polls, ready);
+        job->receiver_transform = source.m_xform;
+        hidden_results += job->receiver_hidden;
+        state->receiver_polled += polls;
+        state->receiver_ready += ready;
+        state->receiver_pending += tests->pending;
+        if (ready) state->receiver_age = _max(state->receiver_age, u32(Device.dwFrame - tests->result_frame));
+        if (tests->pending == local_light_depth::ReceiverQueries::capacity) { ++state->receiver_full; continue; }
+        if (!begun)
+        {
+            if (!state->receivers.Begin()) break;
+            begun = true;
+        }
+        if (state->receivers.Issue(*tests, source, state->receiver_generation, tile))
+        {
+            ++state->receiver_tests;
+            state->receiver_spots += source.flags.type == IRender_Light::SPOT;
+        }
+    }
+    if (begun) state->receivers.End();
+    PROF_TAG("Receiver tests", state->receiver_tests);
+    PROF_TAG("Receiver hidden results", hidden_results);
+    PROF_TAG("Receiver spot tests", state->receiver_spots);
+    PROF_TAG("Receiver pending queries", state->receiver_pending);
+    PROF_TAG("Receiver queue full", state->receiver_full);
 }
 
 void LocalLightShadows::Record()
@@ -650,6 +884,43 @@ void LocalLightShadows::Record()
                 RImplementation.Target->prepare_light_accumulation(job->illumination, item, false);
             if (job->accumulate && job->deferred) item.X.S.transluent = FALSE;
         }
+    }
+    // Finish every capture/pose callback before consuming visibility: a later
+    // object's callback may change an earlier light. Submission alone is skipped.
+    const bool receiver_view_current = state->receiver_view_valid && state->receiver_frame == Device.dwFrame &&
+        !memcmp(&state->receiver_camera, &Device.mFullTransform, sizeof(Fmatrix)) &&
+        !memcmp(&state->receiver_bias, &ps_ssfx_shadow_bias, sizeof(Fvector3)) &&
+        state->receiver_depth.x == ps_r2_ls_depth_scale && state->receiver_depth.y == ps_r2_ls_depth_bias;
+    PROF_TAG("Receiver view changed", u32(!receiver_view_current));
+    for (auto& job : state->lights)
+    {
+        auto& item = *job->source;
+        const bool hidden = job->receiver_hidden;
+        job->receiver_hidden = false;
+        if (job->cache_depth && (item.m_moving_frames < 32 || !job->cache->Current(item) ||
+            !job->cache->depth_tile->Matches(item))) job->cache_depth = false;
+        if (ps_r4_static_light_cache < 2 || !receiver_view_current || job->forward || !hidden ||
+            (item.flags.type != IRender_Light::SPOT && !job->cache_depth) ||
+            memcmp(&job->receiver_transform, &item.m_xform, sizeof(Fmatrix)) || !ReceiverSourceKnown(item)) continue;
+        job->receiver_hidden = true;
+        ++state->receiver_hidden;
+        ++state->rejected;
+        item.GMLight.RGraph.clear_dynamic<false>();
+        if (LocalLightDebug::active) LocalLightDebug::ReceiverRejected(item);
+    }
+    if (state->receiver_hidden)
+    {
+        for (auto& atlas : state->atlases)
+            atlas.lights.erase(std::remove_if(atlas.lights.begin(), atlas.lights.end(),
+                [](const LightShadowJob* job) { return job->receiver_hidden; }), atlas.lights.end());
+        state->atlases.erase(std::remove_if(state->atlases.begin(), state->atlases.end(),
+            [](const ShadowAtlasJob& atlas) { return atlas.lights.empty(); }), state->atlases.end());
+        auto& source = state->package->v_shadowed;
+        source.erase(std::remove_if(source.begin(), source.end(), [this](light* item)
+        {
+            return std::any_of(state->lights.begin(), state->lights.end(),
+                [item](const std::unique_ptr<LightShadowJob>& job) { return job->source == item && job->receiver_hidden; });
+        }), source.end());
     }
     // Only complete atlases can be illuminated before owner fallback. Unknown
     // cases split the run; they retain one shadow-only list and owner lighting.
@@ -782,6 +1053,8 @@ bool LocalLightShadows::RenderShadows(light_Package& package)
             {
                 auto& item = *job->source;
                 auto& graph = item.GMLight;
+                if (recorded && job->cache_depth && job->cache->depth_tile->written)
+                    job->cache->depth_tile->valid = true;
                 if (recorded && job->cache && job->cache->selected != no_index)
                     job->cache->visibility.pending = job->cache->selected;
                 if (recorded && block.accumulate)
@@ -861,6 +1134,23 @@ bool LocalLightShadows::RenderShadows(light_Package& package)
     PROF_TAG("Local skipped static scans", skipped_static);
     PROF_TAG("Local skipped dynamic scans", skipped_dynamic);
     PROF_TAG("Local fallback packets", fallback_packets);
+    u32 depth_hits = 0, depth_builds = 0;
+    for (const auto& job : state->lights)
+    {
+        depth_hits += job->depth_hit;
+        depth_builds += job->depth_built;
+    }
+    PROF_TAG("Static light depth hits", depth_hits);
+    PROF_TAG("Static light depth builds", depth_builds);
+    PROF_TAG("Receiver tests ready", state->receiver_ready);
+    PROF_TAG("Receiver tests late", state->receiver_polled - state->receiver_ready);
+    PROF_TAG("Receiver query polls", state->receiver_polled);
+    PROF_TAG("Receiver result age max", state->receiver_age);
+    PROF_TAG("Receiver hidden views", state->receiver_hidden);
+    if (LocalLightDebug::active)
+        LocalLightDebug::ReceiverFrame({Device.dwFrame, u32(state->lights.size()), state->receiver_tests,
+            state->receiver_spots, state->receiver_ready, state->receiver_pending, state->receiver_full,
+            state->receiver_age, state->receiver_hidden, state->receiver_reset});
     RCache.shadow_texture_source = nullptr; RCache.shadow_texture_view = nullptr;
     RCache.InvalidateAfterCommandList();
     RImplementation.phase = state->atlases.empty() ? saved_phase : CRender::PHASE_SMAP;
@@ -892,6 +1182,7 @@ void LocalLightShadows::Forget(light* source)
         std::any_of(state->unshadowed.begin(), state->unshadowed.end(),
             [source](const UnshadowedLight& job) { return job.source == source; })) EndFrame();
     state->caches.erase(source);
+    state->spot_receivers.erase(source);
 }
 
 void LocalLightShadows::Clear()

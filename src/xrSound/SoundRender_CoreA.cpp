@@ -88,7 +88,7 @@ void CSoundRender_CoreA::LoadEffect()
 	// Check if an error occured, and clean up if so.
 	ALenum err = alGetError();
 
-	if (psSoundFlags.test(ss_EFX))
+	if (runtime.efx)
 	{
 		if (err == AL_NO_ERROR)
 		{
@@ -172,28 +172,28 @@ void CSoundRender_CoreA::commit()
 void CSoundRender_CoreA::set_listener(const CSoundRender_Environment& env)
 {
     // Reverb overwrite
-    if (reverb_overwrite) {
-		A_CHK(alEffectf(effect, AL_EAXREVERB_DENSITY, psReverbDensity));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_DIFFUSION, psReverbDiffusion));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_GAIN, psReverbGain));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_GAINHF, psReverbGainHF));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_GAINLF, psReverbGainLF));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_DECAY_TIME, psReverbDecayTime));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_DECAY_HFRATIO, psReverbDecayHFRatio));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_DECAY_LFRATIO, psReverbDecayLFRatio));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_REFLECTIONS_GAIN, psReverbReflectionsGain));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_REFLECTIONS_DELAY, psReverbReflectionsDelay));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_LATE_REVERB_GAIN, psReverbLateReverbGain));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_LATE_REVERB_DELAY, psReverbLateReverbDelay));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_ECHO_TIME, psReverbEchoTime));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_ECHO_DEPTH, psReverbEchoDepth));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_MODULATION_TIME, psReverbModulationTime));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_MODULATION_DEPTH, psReverbModulationDepth));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_AIR_ABSORPTION_GAINHF, psReverbAirAbsorptionGainHF));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_HFREFERENCE, psReverbHFReference));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_LFREFERENCE, psReverbLFReference));
-        A_CHK(alEffectf(effect, AL_EAXREVERB_ROOM_ROLLOFF_FACTOR, psReverbRoomRolloffFactor));
-        A_CHK(alEffecti(effect, AL_EAXREVERB_DECAY_HFLIMIT, psReverbDecayHFLimit));
+    if (runtime.reverbOverwrite) {
+		A_CHK(alEffectf(effect, AL_EAXREVERB_DENSITY, runtime.psReverbDensity));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_DIFFUSION, runtime.psReverbDiffusion));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_GAIN, runtime.psReverbGain));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_GAINHF, runtime.psReverbGainHF));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_GAINLF, runtime.psReverbGainLF));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_DECAY_TIME, runtime.psReverbDecayTime));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_DECAY_HFRATIO, runtime.psReverbDecayHFRatio));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_DECAY_LFRATIO, runtime.psReverbDecayLFRatio));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_REFLECTIONS_GAIN, runtime.psReverbReflectionsGain));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_REFLECTIONS_DELAY, runtime.psReverbReflectionsDelay));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_LATE_REVERB_GAIN, runtime.psReverbLateReverbGain));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_LATE_REVERB_DELAY, runtime.psReverbLateReverbDelay));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_ECHO_TIME, runtime.psReverbEchoTime));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_ECHO_DEPTH, runtime.psReverbEchoDepth));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_MODULATION_TIME, runtime.psReverbModulationTime));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_MODULATION_DEPTH, runtime.psReverbModulationDepth));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_AIR_ABSORPTION_GAINHF, runtime.psReverbAirAbsorptionGainHF));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_HFREFERENCE, runtime.psReverbHFReference));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_LFREFERENCE, runtime.psReverbLFReference));
+        A_CHK(alEffectf(effect, AL_EAXREVERB_ROOM_ROLLOFF_FACTOR, runtime.psReverbRoomRolloffFactor));
+        A_CHK(alEffecti(effect, AL_EAXREVERB_DECAY_HFLIMIT, runtime.decayHFLimit));
     }
     ////
     else 
@@ -266,16 +266,17 @@ void CSoundRender_CoreA::refresh_devices()
 	if (!pDeviceList)
 		return;
 
-	pDeviceList->Enumerate();
+	pDeviceList->Enumerate(false);
+	++device_revision;
 	Msg("SOUND: OpenAL: Device list refreshed, %d devices found", pDeviceList->GetNumDevices());
 
 	if (pDeviceList->GetNumDevices() == 0)
 		return;
 
-	const ALDeviceDesc* pDeviceDesc = pDeviceList->GetDeviceDescByName(snd_device_name.c_str());
+	const ALDeviceDesc* pDeviceDesc = pDeviceList->GetDeviceDescByName(backend_device_name.c_str());
 	if (!pDeviceDesc)
     {
-        Msg("! SOUND: Current device not found after refresh: %s. Switching to default", snd_device_name.c_str());
+        Msg("! SOUND: Current device not found after refresh: %s. Switching to default", backend_device_name.c_str());
 		switch_device(pDeviceList->GetDefaultDeviceName());
     }
 }
@@ -288,7 +289,7 @@ void CSoundRender_CoreA::default_device_changed()
     if (pDeviceList->GetNumDevices() == 0)
         return;
 
-    if (_stricmp(snd_device_name.c_str(), pDeviceList->GetDefaultDeviceName()) == 0)
+    if (_stricmp(backend_device_name.c_str(), pDeviceList->GetDefaultDeviceName()) == 0)
     {
         Msg("SOUND: Default device changed, switching to new default device");
         switch_device(pDeviceList->GetDefaultDeviceName());
@@ -344,7 +345,8 @@ void CSoundRender_CoreA::switch_device(LPCSTR device_name)
 
 	pDevice = newDevice;
 	pContext = newContext;
-	snd_device_name = deviceDesc.name;
+	backend_device_name = deviceDesc.name;
+	++device_revision;
 
 	alcMakeContextCurrent(pContext);
 	alcDestroyContext(oldContext);
@@ -392,6 +394,8 @@ void CSoundRender_CoreA::_initialize(int stage)
 	R_ASSERT2(pDeviceDesc, make_string("Sound device not found: %s", snd_device_name.c_str()));
 	const ALDeviceDesc& deviceDesc = *pDeviceDesc;
 	// OpenAL device
+	backend_device_name = deviceDesc.name;
+	++device_revision;
 	pDevice = alcOpenDevice(deviceDesc.name_al);
 	if (pDevice == nullptr)
 	{
@@ -516,6 +520,12 @@ void CSoundRender_CoreA::set_master_volume(float f)
 	}
 }
 
+void CSoundRender_CoreA::CopyDeviceState(xr_string& name, xr_vector<xr_string>& names) const
+{
+	name = backend_device_name;
+	if (pDeviceList) pDeviceList->CopyNames(names);
+}
+
 void CSoundRender_CoreA::_clear()
 {
 	inherited::_clear();
@@ -544,8 +554,8 @@ void CSoundRender_CoreA::update_listener(const Fvector& P, const Fvector& D, con
 
 	Listener.curVelocity.sub(P, Listener.position);
 
-	float a = soundSmoothingParams::getTimeDeltaSmoothing();
-	int p = soundSmoothingParams::power;
+	float a = runtime.velocityAlpha;
+	int p = int(runtime.velocityPower);
 	Listener.accVelocity.x = soundSmoothingParams::getSmoothedValue(Listener.curVelocity.x * p / dt, Listener.accVelocity.x, a);
 	Listener.accVelocity.y = soundSmoothingParams::getSmoothedValue(Listener.curVelocity.y * p / dt, Listener.accVelocity.y, a);
 	Listener.accVelocity.z = soundSmoothingParams::getSmoothedValue(Listener.curVelocity.z * p / dt, Listener.accVelocity.z, a);

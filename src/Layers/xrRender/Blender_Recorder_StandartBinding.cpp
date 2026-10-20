@@ -1431,46 +1431,48 @@ static class ssfx_pom : public NativeConstantSetup
 	}
 }    ssfx_pom;
 
+#if defined(USE_DX11) && RENDER == R_R4
+Fvector4 CalculateRenderJitter()
+#else
+static Fvector4 CalculateRenderJitter()
+#endif
+{
+    float jitter_x = 0.f, jitter_y = 0.f;
+#if defined(USE_DX11)
+    if (ps_ssfx_taa.x > 0 && RImplementation.o.ssfx_taa)
+    {
+        static const Fvector2 offsets[4] = {{0.f, -1.f}, {-1.f, 0.f}, {1.f, 0.f}, {0.f, 1.f}};
+        jitter_x = offsets[Device.dwFrame % 4].x / Device.dwWidth;
+        jitter_y = offsets[Device.dwFrame % 4].y / Device.dwHeight;
+    }
+    if (dlss::Configured())
+    {
+        const auto jitter = dlss::ClipJitter(dlss::RasterJitter(), {dlss::RenderWidth(), dlss::RenderHeight()});
+        return Fvector4().set(jitter.x, jitter.y, 0.f, 0.f);
+    }
+#endif
+    return Fvector4().set(jitter_x * ps_ssfx_taa.y, jitter_y * ps_ssfx_taa.y, ps_ssfx_taa.x, ps_ssfx_taa.w);
+}
+
 static class ssfx_jitter : public NativeConstantSetup
 {
-	virtual void setup(R_constant* C)
-	{
-		float JitterX = 0;
-		float JitterY = 0;
+    void setup(R_constant* C) override
+    {
+        RCache.set_c(C, CalculateRenderJitter());
+    }
+} ssfx_jitter;
 
 #if defined(USE_DX11)
-		if (ps_ssfx_taa.x > 0 && RImplementation.o.ssfx_taa)
-		{
-			static Fvector2 TAA_Offset[4] = 
-			{
-				{  0.0f, -1.0f },
-				{ -1.0f,  0.0f },
-				{  1.0f,  0.0f },
-				{  0.0f,  1.0f }
-			};
+Fvector4 CalculateUpscalerParameters()
+{
+    return Fvector4().set(dlss::Active() ? 1.0f : 0.0f, float(dlss::RenderWidth()), float(dlss::RenderHeight()), 0.0f);
+}
 
-			JitterX = TAA_Offset[ Device.dwFrame % 4 ].x / Device.dwWidth;
-			JitterY = TAA_Offset[ Device.dwFrame % 4 ].y / Device.dwHeight;
-		}
-		if (dlss::Configured())
-		{
-			const auto jitter = dlss::ClipJitter(dlss::RasterJitter(), {dlss::RenderWidth(), dlss::RenderHeight()});
-			RCache.set_c(C, jitter.x, jitter.y, 0.0f, 0.0f);
-			return;
-		}
-#endif
-
-		RCache.set_c(C, JitterX * ps_ssfx_taa.y, JitterY * ps_ssfx_taa.y, ps_ssfx_taa.x, ps_ssfx_taa.w);
-
-	}
-}    ssfx_jitter;
-
-#if defined(USE_DX11)
 static class dlss_params : public NativeConstantSetup
 {
     void setup(R_constant* C) override
     {
-        RCache.set_c(C, dlss::Active() ? 1.0f : 0.0f, float(dlss::RenderWidth()), float(dlss::RenderHeight()), 0.0f);
+        RCache.set_c(C, CalculateUpscalerParameters());
     }
 } binder_dlss_params;
 static class dlss_temporal_jitter : public NativeConstantSetup

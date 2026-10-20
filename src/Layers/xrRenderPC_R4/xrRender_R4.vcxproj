@@ -564,6 +564,7 @@
     <ClInclude Include="r4.h" />
     <ClInclude Include="RenderViewPreparation.h" />
     <ClInclude Include="LocalLightShadows.h" />
+    <ClInclude Include="LocalLightDepthCache.h" />
     <ClInclude Include="LocalLightDebug.h" />
     <ClInclude Include="SunShadows.h" />
     <ClInclude Include="LocalShadowVisibility.h" />

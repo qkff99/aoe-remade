@@ -6,6 +6,10 @@
 #include "SoundRender_Core.h"
 #include "SoundRender_Source.h"
 #include "SoundRender_Emitter.h"
+#include "SoundDecodeQueue.h"
+
+extern xr_vector<u8> g_target_temp_data;
+extern xr_vector<u8> g_target_temp_data_16;
 
 #include "NotificationClient.h"
 
@@ -82,6 +86,9 @@ void CSoundRender_Core::_initialize(int stage)
 	cache_bytes_per_line = (sdef_target_block / 8) * 276400 / 1000;
 	cache.initialize(psSoundCacheSizeMB * 1024, cache_bytes_per_line);
 
+	g_target_temp_data.resize(sdef_target_block * 44100 * 2 / 1000);
+	g_target_temp_data_16.resize(g_target_temp_data.size() * 2);
+	SoundDecodeStart();
 	bReady = TRUE;
 
 	if (Core.ParamsData.test(ECoreParams::prefetch_sounds))
@@ -90,11 +97,11 @@ void CSoundRender_Core::_initialize(int stage)
 	}
 }
 
-extern xr_vector<u8> g_target_temp_data;
-extern xr_vector<u8> g_target_temp_data_16;
+
 
 void CSoundRender_Core::_clear()
 {
+	SoundDecodeShutdown();
     drain_deferred_destroy();
 	bReady = FALSE;
 	cache.destroy();
@@ -166,8 +173,10 @@ void CSoundRender_Core::env_unload()
 
 void CSoundRender_Core::_restart()
 {
+	SoundDecodeShutdown();
 	cache.destroy();
 	cache.initialize(psSoundCacheSizeMB * 1024, cache_bytes_per_line);
+	SoundDecodeStart();
 	env_apply();
 }
 
@@ -586,3 +595,8 @@ void CSoundRender_Core::set_environment	(u32 id, CSound_environment** dst_env)
 	
 }
 #endif
+
+void CSoundRender_Core::wait_for_streaming()
+{
+	SoundDecodeWait();
+}

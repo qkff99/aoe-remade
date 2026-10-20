@@ -7,6 +7,7 @@
 #include "SoundRender_TargetA.h"
 #include "SoundRender_Source.h"
 #include "SoundRender_CoreA.h"
+#include "SoundDecodeQueue.h"
 
 CSoundRender_Emitter* CSoundRender_Core::i_play(ref_sound* S, BOOL _loop, float delay)
 {
@@ -25,24 +26,15 @@ void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector
 	u32 it;
 
 	if (0 == bReady) return;
+	SoundDecodePublish();
     drain_deferred_destroy();
 
-	if (bPendingDeviceListRefresh)
-	{
-		bPendingDeviceListRefresh = FALSE;
-		refresh_devices();
-	}
-	if (bPendingDefaultDeviceSwitch)
-	{
-		bPendingDefaultDeviceSwitch = FALSE;
-		default_device_changed();
-	}
 
 	bLocked = TRUE;
 	float new_tm = Timer.GetElapsed_sec();
 	fTimer_Delta = new_tm - fTimer_Value;
 	//.	float dt					= float(Timer_Delta)/1000.f;
-	float dt_sec = fTimer_Delta;
+	float dt_sec = _max(fTimer_Delta, EPS_S);
 	fTimer_Value = new_tm;
 
 	s_emitters_u ++;
@@ -130,7 +122,7 @@ void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector
 
 		// demonized: Interpolate from e_current to 95% of e_target in close to exact time
 		constexpr float percent = 0.95f;
-		float alpha = 1.0f - std::exp(std::log(1.0f - percent) * dt_sec / snd_efx_environment_change_time);
+		float alpha = 1.0f - std::exp(std::log(1.0f - percent) * dt_sec / SoundRender->runtime.snd_efx_environment_change_time);
 		clamp(alpha, 0.f, 1.f);
 		//Msg("interpolating from e_current to e_target %.2f", std::min(e_current.Reverb, e_target_ptr->Reverb) / std::max(e_current.Reverb, e_target_ptr->Reverb));
 		e_current.lerp(e_current, *e_target_ptr, alpha);
@@ -224,13 +216,15 @@ void CSoundRender_Core::statistic(CSound_stats* dest, CSound_stats_ext* ext)
 float CSoundRender_Core::get_occlusion_to(const Fvector& hear_pt, const Fvector& snd_pt, float dispersion)
 {
 	PROF_EVENT("CSoundRender_Core::get_occlusion_to");
+	static thread_local CDB::COLLIDER occlusion_collider;
 	float occ_value = 1.f;
 
 	if (0 != geom_SOM)
 	{
 		// Calculate RAY params
 		Fvector pos, dir;
-		pos.random_dir();
+		static thread_local CRandom occlusionRandom;
+	pos.random_dir(occlusionRandom);
 		pos.mul(dispersion);
 		pos.add(snd_pt);
 		dir.sub(pos, hear_pt);
@@ -243,10 +237,10 @@ float CSoundRender_Core::get_occlusion_to(const Fvector& hear_pt, const Fvector&
 		u32 r_cnt				= ETOOLS::r_count();
 		CDB::RESULT*	_B 		= ETOOLS::r_begin();
 #else
-		geom_DB.ray_options(CDB::OPT_CULL);
-		geom_DB.ray_query(geom_SOM, hear_pt, dir, range);
-		u32 r_cnt = geom_DB.r_count();
-		CDB::RESULT* _B = geom_DB.r_begin();
+		occlusion_collider.ray_options(CDB::OPT_CULL);
+		occlusion_collider.ray_query(geom_SOM, hear_pt, dir, range);
+		u32 r_cnt = occlusion_collider.r_count();
+		CDB::RESULT* _B = occlusion_collider.r_begin();
 #endif
 		if (0 != r_cnt)
 		{
@@ -263,13 +257,15 @@ float CSoundRender_Core::get_occlusion_to(const Fvector& hear_pt, const Fvector&
 float CSoundRender_Core::get_occlusion(Fvector& P, float R, Fvector* occ)
 {
 	PROF_EVENT("CSoundRender_Core::get_occlusion");
+	static thread_local CDB::COLLIDER occlusion_collider;
 	float occ_value = 1.f;
 
 	// Calculate RAY params
 	Fvector base = listener_position();
 	Fvector pos, dir;
 	float range;
-	pos.random_dir();
+	static thread_local CRandom occlusionRandom;
+	pos.random_dir(occlusionRandom);
 	pos.mul(R);
 	pos.add(P);
 	dir.sub(pos, base);
@@ -284,7 +280,7 @@ float CSoundRender_Core::get_occlusion(Fvector& P, float R, Fvector* occ)
 		if (CDB::TestRayTri(base, dir, occ, _u, _v, _range, true))
 			if (_range > 0 && _range < range)
 			{
-				occ_value = psSoundOcclusionScale;
+				occ_value = SoundRender->runtime.psSoundOcclusionScale;
 				bNeedFullTest = false;
 			}
 		// 2. Polygon doesn't picked up - real database query
@@ -297,19 +293,19 @@ float CSoundRender_Core::get_occlusion(Fvector& P, float R, Fvector* occ)
 				// cache polygon
 				const CDB::RESULT*	R = ETOOLS::r_begin			();
 #else
-			geom_DB.ray_options(CDB::OPT_ONLYNEAREST);
-			geom_DB.ray_query(geom_MODEL, base, dir, range);
-			if (0 != geom_DB.r_count())
+			occlusion_collider.ray_options(CDB::OPT_ONLYNEAREST);
+			occlusion_collider.ray_query(geom_MODEL, base, dir, range);
+			if (0 != occlusion_collider.r_count())
 			{
 				// cache polygon
-				const CDB::RESULT* R = geom_DB.r_begin();
+				const CDB::RESULT* R = occlusion_collider.r_begin();
 #endif
 				const CDB::TRI& T = geom_MODEL->get_tris()[R->id];
 				const Fvector* V = geom_MODEL->get_verts();
 				occ[0].set(V[T.verts[0]]);
 				occ[1].set(V[T.verts[1]]);
 				occ[2].set(V[T.verts[2]]);
-				occ_value = psSoundOcclusionScale;
+				occ_value = SoundRender->runtime.psSoundOcclusionScale;
 			}
 		}
 	}
@@ -321,10 +317,10 @@ float CSoundRender_Core::get_occlusion(Fvector& P, float R, Fvector* occ)
 		u32 r_cnt				= ETOOLS::r_count();
         CDB::RESULT*	_B 		= ETOOLS::r_begin();
 #else
-		geom_DB.ray_options(CDB::OPT_CULL);
-		geom_DB.ray_query(geom_SOM, base, dir, range);
-		u32 r_cnt = geom_DB.r_count();
-		CDB::RESULT* _B = geom_DB.r_begin();
+		occlusion_collider.ray_options(CDB::OPT_CULL);
+		occlusion_collider.ray_query(geom_SOM, base, dir, range);
+		u32 r_cnt = occlusion_collider.r_count();
+		CDB::RESULT* _B = occlusion_collider.r_begin();
 #endif
 		if (0 != r_cnt)
 		{

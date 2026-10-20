@@ -21,7 +21,14 @@ void Cached(light& source);
 void QueryIssued(light& source);
 void QueryResult(light& source, long result, unsigned long long samples);
 void Accepted(light& source);
+void ReceiverRejected(light& source);
 void Submitted(light& source);
+
+struct ReceiverHistoryStats
+{
+    unsigned frame, sources, tests, spots, ready, pending, full, age, hidden, reset;
+};
+void ReceiverFrame(const ReceiverHistoryStats& stats);
 
 struct Marker
 {

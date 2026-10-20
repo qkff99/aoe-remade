@@ -48,7 +48,7 @@ private:
 	typedef REGISTRY::iterator REGISTRY_IT;
 private:
 	xr_vector<ModelDef> Models; // Reference / Base
-	xr_vector<dxRender_Visual*> ModelsToDelete; // 
+	xr_vector<std::pair<dxRender_Visual*, BOOL>> ModelsToDelete;
     xr_vector<dxRender_Visual*> ModelsToDeleteDeffer; // 
 	REGISTRY Registry; // Just pairing of pointer / Name
 	POOL Pool; // Unused / Inactive

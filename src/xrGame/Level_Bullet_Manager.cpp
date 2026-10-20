@@ -1238,6 +1238,12 @@ void __stdcall CBulletManager::net_Relcase(CObject* object)
 void CBulletManager::CommitEvents() // @ the start of frame
 {
 	PROF_EVENT("CBulletManager::CommitEvents");
+	PROF_TAG("Bullet events", u32(m_Events.size()));
+	const auto lock_events = [this]()
+	{
+		PROF_EVENT("Bullets.Commit.LockWait");
+		return xrCriticalSectionGuard(&m_Lock);
+	};
 	if (m_Events.size() > 1000)
 		Msg("! too many bullets during single frame: %d", m_Events.size());
 
@@ -1253,9 +1259,16 @@ void CBulletManager::CommitEvents() // @ the start of frame
 			{
 				// demonized: bullet on impact callback
 				{
-					xrCriticalSectionGuard guard(&m_Lock);
+					PROF_EVENT("Bullets.Commit.ImpactCallback");
+					auto guard = lock_events();
 					::luabind::functor<void> funct;
-					if (ai().script_engine().functor("_G.CBulletOnImpact", funct)) {
+					bool has_callback;
+					{
+						PROF_EVENT("Bullets.Commit.LookupCallback");
+						has_callback = ai().script_engine().functor("_G.CBulletOnImpact", funct);
+					}
+					if (has_callback) {
+						PROF_EVENT("Bullets.Commit.BuildAndCallLua");
 						::luabind::object table = ::luabind::newtable(ai().script_engine().lua());
 						populateBulletTable(
 							table,
@@ -1276,17 +1289,32 @@ void CBulletManager::CommitEvents() // @ the start of frame
 					}
 				}
 
-				if (E.dynamic) DynamicObjectHit(E);
-				else StaticObjectHit(E);
+				if (E.dynamic)
+				{
+					PROF_EVENT("Bullets.Commit.DynamicHit");
+					DynamicObjectHit(E);
+				}
+				else
+				{
+					PROF_EVENT("Bullets.Commit.StaticHit");
+					StaticObjectHit(E);
+				}
 			}
 
 			break;
 		case EVENT_REMOVE:
 			{
 				// demonized: bullet on remove callback
-				xrCriticalSectionGuard guard(&m_Lock);
+				PROF_EVENT("Bullets.Commit.Remove");
+				auto guard = lock_events();
 				::luabind::functor<void> funct;
-				if (ai().script_engine().functor("_G.CBulletOnRemove", funct)) {
+				bool has_callback;
+				{
+					PROF_EVENT("Bullets.Commit.LookupCallback");
+					has_callback = ai().script_engine().functor("_G.CBulletOnRemove", funct);
+				}
+				if (has_callback) {
+					PROF_EVENT("Bullets.Commit.BuildAndCallLua");
 					::luabind::object table = ::luabind::newtable(ai().script_engine().lua());
 					populateBulletTable(
 						table,

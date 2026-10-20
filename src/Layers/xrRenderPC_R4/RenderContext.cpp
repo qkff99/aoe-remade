@@ -222,8 +222,8 @@ void RenderContext::Prime(const SPass& pass)
         entry.owner = source.second;
         // Loading, staging conversion and animated texture advancement stay on
         // the owner. Workers bind immutable SRV snapshots, never shared decoders.
-        texture->bind(source.first);
-        entry.view = texture->get_SRView();
+        texture->Bind(source.first);
+        entry.view = texture->RenderView();
         entry.frame = state->prime_generation;
     }
 }

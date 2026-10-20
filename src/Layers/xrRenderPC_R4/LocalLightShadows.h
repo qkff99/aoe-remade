@@ -41,6 +41,7 @@ public:
     LocalLightShadows();
     ~LocalLightShadows();
     void BeginFrame(light_Package& lights);
+    void TestReceivers();
     void Record();
     bool RenderShadows(light_Package& lights);
     void EndFrame();

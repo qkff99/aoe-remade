@@ -8,6 +8,9 @@
 
 #include "lj_obj.h"
 
+#define LJ_XRAY_SCANNED_UDATA 1u
+#define LJ_XRAY_CANDIDATE_UDATA 2u
+
 LJ_FUNC GCudata *lj_udata_new(lua_State *L, MSize sz, GCtab *env);
 LJ_FUNC void LJ_FASTCALL lj_udata_free(global_State *g, GCudata *ud);
 

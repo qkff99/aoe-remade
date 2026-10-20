@@ -513,6 +513,7 @@ public:
     template<bool Recorded, class Light> void accum_spot_impl(Light* L, u32& marker);
     void bind_recorded_accumulator();
     bool prepare_light_accumulation(RecordedLight& result, light& source, bool point);
+    bool supports_static_light_receiver(const light& source) const;
 	void accum_reflected(light* L);
 	//	Igor: for volumetric lights
 	void accum_volumetric(light* L);

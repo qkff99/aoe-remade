@@ -259,7 +259,7 @@ LUA_API void lua_close(lua_State *L)
     if (lj_vm_cpcall(L, NULL, NULL, cpfinalize) == 0) {
       if (++i >= 10) break;
       lj_gc_separateudata(g, 1);  /* Separate udata again. */
-      if (gcref(g->gc.mmudata) == NULL && gcref(g->gc.udfin) == NULL)  /* Until nothing is left to do. */
+      if (gcref(g->gc.mmudata) == NULL)  /* Until nothing is left to do. */
 	break;
     }
   }

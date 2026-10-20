@@ -141,6 +141,7 @@ namespace PAPI
 		float age; // 4       
 		u16 frame; // 2
 		Flags16 flags; // 2
+		u64 render_id;
 	}; // = 116
 
 	typedef void (* OnBirthParticleCB)(void* owner, u32 param, PAPI::Particle& P, u32 idx);

@@ -312,6 +312,11 @@ void IGame_Persistent::UpdateParticles()
 	};
 
 	ps_active.erase(std::remove_if(ps_active.begin(), ps_active.end(), eraseFunc), ps_active.end());
+    PROF_EVENT("Particles.Publish");
+    u32 published = 0;
+    for (const auto& particle : ps_active)
+        published += particle->PublishRenderState() ? 1u : 0u;
+    PROF_TAG("Published particle systems", published);
 }
 
 void IGame_Persistent::destroy_particles(bool all_particles)

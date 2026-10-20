@@ -81,6 +81,23 @@ namespace PS
 		float m_CurrentTime;
 		Fvector m_InitialPosition;
 	public:
+        struct ChildFrame
+        {
+            intrusive_ptr<dxParticleCustom> visual;
+            RenderStatePtr state;
+        };
+        struct GroupFrame : RenderState
+        {
+            xr_vector<ChildFrame> children;
+        };
+        RenderStatePtr CaptureRenderState() override;
+        void PublishRenderState(const RenderStatePtr& state) override;
+        const std::shared_ptr<const GroupFrame>& PublishedFrame() const { return published_frame; }
+    private:
+        std::shared_ptr<GroupFrame> frame_buffers[2];
+        std::shared_ptr<const GroupFrame> published_frame;
+        u32 next_frame_buffer = 0;
+    public:
 		xrCriticalSection onframe_lock;
 		using VisualVec = xr_vector<dxRender_Visual*>;
 		using VisualVecIt = VisualVec::iterator;

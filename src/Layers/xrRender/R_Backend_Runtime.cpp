@@ -244,7 +244,7 @@ void CBackend::BindTexture(CTexture* surface, u32 stage)
         return;
     }
 #endif
-    surface->bind(stage);
+    surface->Bind(stage);
 }
 
 void CBackend::set_Textures(STextureList* _T)

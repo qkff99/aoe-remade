@@ -1476,6 +1476,9 @@
     <ClInclude Include="LocalLightShadows.h">
       <Filter>Lights</Filter>
     </ClInclude>
+    <ClInclude Include="LocalLightDepthCache.h">
+      <Filter>Lights</Filter>
+    </ClInclude>
     <ClInclude Include="LocalLightDebug.h">
       <Filter>Lights</Filter>
     </ClInclude>

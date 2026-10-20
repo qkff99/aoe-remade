@@ -33,6 +33,48 @@ bool dump_requested = false;
 u32 next_id = 1;
 Fmatrix view_projection;
 Fvector camera_position;
+constexpr u32 receiver_history_size = 256;
+ReceiverHistoryStats receiver_history[receiver_history_size]{};
+ReceiverHistoryStats last_receiver_delay{}, last_receiver_reset{};
+u32 receiver_history_next = 0, receiver_history_count = 0;
+
+void PrintReceiverHistory(const ReceiverHistoryStats& row, u32 last_frame)
+{
+    Msg("[LREC] frames=%u..%u sources=%u tests=%u spots=%u ready=%u pending=%u full=%u age=%u hidden=%u reset=%u",
+        row.frame, last_frame, row.sources, row.tests, row.spots, row.ready, row.pending,
+        row.full, row.age, row.hidden, row.reset);
+}
+
+void DumpReceiverHistory()
+{
+    Msg("[LREC] Previous %u frames retained without Optick; pending counts outstanding queries before new submission.", receiver_history_count);
+    if (last_receiver_delay.pending || last_receiver_delay.full)
+    {
+        Msg("[LREC] Last delayed-query frame (retained even if outside the rolling history):");
+        PrintReceiverHistory(last_receiver_delay, last_receiver_delay.frame);
+    }
+    if (last_receiver_reset.reset)
+    {
+        Msg("[LREC] Last history reset:");
+        PrintReceiverHistory(last_receiver_reset, last_receiver_reset.frame);
+    }
+    for (u32 i = 0; i < receiver_history_count;)
+    {
+        const auto& first = receiver_history[(receiver_history_next + receiver_history_size - receiver_history_count + i) % receiver_history_size];
+        u32 last_frame = first.frame;
+        ++i;
+        while (i < receiver_history_count)
+        {
+            auto next = receiver_history[(receiver_history_next + receiver_history_size - receiver_history_count + i) % receiver_history_size];
+            const u32 frame = next.frame;
+            next.frame = first.frame;
+            if (memcmp(&first, &next, sizeof(first))) break;
+            last_frame = frame;
+            ++i;
+        }
+        PrintReceiverHistory(first, last_frame);
+    }
+}
 
 Entry& Touch(light& source)
 {
@@ -114,6 +156,15 @@ void RequestDump()
     Msg("[LDBG] Dump requested for the next main-view level frame. Use r4_light_debug 1 first to retain query history.");
 }
 
+void ReceiverFrame(const ReceiverHistoryStats& stats)
+{
+    receiver_history[receiver_history_next] = stats;
+    receiver_history_next = (receiver_history_next + 1) % receiver_history_size;
+    receiver_history_count = _min(receiver_history_count + 1, receiver_history_size);
+    if (stats.pending || stats.full) last_receiver_delay = stats;
+    if (stats.reset) last_receiver_reset = stats;
+}
+
 void Forget(const light* source) { entries.erase(source); }
 
 void ParentPassed(light& source)
@@ -151,6 +202,11 @@ void QueryResult(light& source, long result, unsigned long long samples)
 }
 
 void Accepted(light& source) { Touch(source).accepted_frame = Device.dwFrame; }
+void ReceiverRejected(light& source)
+{
+    auto& entry = Touch(source);
+    entry.accepted_frame = entry.submitted_frame = unknown_frame;
+}
 void Submitted(light& source) { Touch(source).submitted_frame = Device.dwFrame; }
 
 void EndFrame()
@@ -185,11 +241,14 @@ void EndFrame()
         light_views += submitted;
     }
     ImDrawList* draw = show && ImGui::GetCurrentContext() ? ImGui::GetForegroundDrawList() : nullptr;
-    const ImVec2 size = draw ? ImGui::GetIO().DisplaySize : ImVec2(float(Device.dwWidth), float(Device.dwHeight));
+    // ImGui's DX backend maps draw coordinates 1:1 to target pixels. In borderless
+    // mode its window-sized DisplaySize can exceed the presented backbuffer.
+    const ImVec2 size = ImVec2(float(Device.dwWidth), float(Device.dwHeight));
     const ImVec2 origin = draw ? ImGui::GetMainViewport()->Pos : ImVec2(0.f, 0.f);
     if (dump_requested)
-        Msg("[LDBG] frame=%u sources=%u shadow_views=%u lighting_views=%u camera=(%.3f,%.3f,%.3f); ages=-1 means history unknown",
-            Device.dwFrame, u32(sources.size()), shadow_views, light_views, VPUSH(camera_position));
+        Msg("[LDBG] frame=%u sources=%u shadow_views=%u lighting_views=%u camera=(%.3f,%.3f,%.3f) output=%ux%u client=%ux%u; ages=-1 means history unknown",
+            Device.dwFrame, u32(sources.size()), shadow_views, light_views, VPUSH(camera_position),
+            Device.dwWidth, Device.dwHeight, Device.clientWidth, Device.clientHeight);
     for (const auto& item : sources)
     {
         const auto& source = item.second;
@@ -228,6 +287,7 @@ void EndFrame()
     }
     if (dump_requested)
     {
+        DumpReceiverHistory();
         static const char* faces[] = {"+X", "-X", "+Y", "-Y", "+Z", "-Z"};
         // Print in stable source/face order, matching overlay IDs.
         for (const auto& row : rows)

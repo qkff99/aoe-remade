@@ -5,6 +5,44 @@
 #include "SoundRender_Source.h"
 #include "SoundRender_Emitter.h"
 #include "SoundRender_Target.h"
+#include "SoundDecodeQueue.h"
+
+bool CSoundRender_Emitter::prepare_data(u32 size)
+{
+	PROF_EVENT("Sound.Decode.RequestRange");
+	if (!owner_data || !size) return true;
+	const bool looped = m_current_state == stPlayingLooped;
+	// Attached-loop cursors mutate the source sequence: preserve that legacy
+	// path until it has an independent immutable stream plan.
+	if (looped && (owner_data->fn_attached[0].size() || m_cur_handle_cursor)) return true;
+	CSoundRender_Source* current = source();
+	u32 offset = get_cursor(false);
+	u32 tail = 0;
+	bool ready = true;
+	const u32 line_size = SoundRender->cache.get_linesize();
+	if (!line_size || !current->CAT.size || !current->dwBytesTotal) return false;
+	if (looped && size >= current->dwBytesTotal)
+	{
+		offset = 0;
+		size = current->dwBytesTotal;
+	}
+	while (size && current)
+	{
+		if (offset < current->dwBytesTotal)
+		{
+			const u32 bytes = _min(size, current->dwBytesTotal - offset);
+			for (u32 line = offset / line_size; line <= (offset + bytes - 1) / line_size; ++line)
+				ready = SoundDecodeRequest(current, line) && ready;
+			size -= bytes;
+		}
+		offset = 0;
+		if (looped) continue;
+		if (tail < 2 && owner_data->fn_attached[tail].size())
+			current = SoundRender->i_create_source(owner_data->fn_attached[tail++].c_str());
+		else current = nullptr; // Non-looping remainder is silence, as in fill_block.
+	}
+	return ready;
+}
 
 void CSoundRender_Emitter::fill_data(u8* _dest, u32 offset, u32 size)
 {
@@ -54,6 +92,7 @@ void CSoundRender_Emitter::fill_data(u8* _dest, u32 offset, u32 size)
 		// cache access
 		if (SoundRender->cache.request(source()->CAT, line))
 		{
+			PROF_EVENT("Sound.Decode.SynchronousFallback");
 			source()->decompress(line, target->get_data());
 		}
 

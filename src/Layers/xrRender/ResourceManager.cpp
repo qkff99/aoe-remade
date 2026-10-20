@@ -468,6 +468,7 @@ void CResourceManager::DeferredUnload()
 
 void CResourceManager::UnloadAllTexturesOnLevelUnload()
 {
+    WaitForTextureLoads();
 	if (!RDEVICE.b_is_Ready)
 		return;
 
@@ -641,6 +642,7 @@ void CResourceManager::EvictStalledTextures() {
   u32 scanned = 0;
   for (; I != m_textures.end() && scanned < batch_size; ++I, ++scanned) {
     CTexture *tex = I->second;
+    if (tex->IsLoading()) continue;
     if (tex->flags.bUser) {
 #ifdef DEBUG
       skip_user++;
@@ -726,3 +728,33 @@ BOOL	CResourceManager::_GetDetailTexture(LPCSTR Name,LPCSTR& T, R_constant_setup
 		return FALSE;
 	}
 }*/
+
+extern xr_task_group textures_load_tasks;
+void CResourceManager::QueueTextureLoad(const ref_texture& texture)
+{
+    if (!texture || !texture->BeginLoadRequest()) return;
+    try
+    {
+        const DWORD owner = GetCurrentThreadId();
+        textures_load_tasks.run([texture, owner]()
+        {
+            PROF_THREAD_IF(owner != GetCurrentThreadId(), "Texture loader");
+            try { texture->Load(
+#ifdef USE_DX11
+                true
+#else
+                false
+#endif
+            ); }
+            catch (...) { texture->EndLoadRequest(); throw; }
+            texture->EndLoadRequest();
+        });
+    }
+    catch (...) { texture->EndLoadRequest(); throw; }
+}
+
+void CResourceManager::WaitForTextureLoads()
+{
+    PROF_EVENT("TextureLoad.LifetimeWait");
+    textures_load_tasks.wait();
+}

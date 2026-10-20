@@ -550,7 +550,6 @@ void CRender::Render()
 	if (L_Shadows)L_Shadows->render(); // ... and shadows
 	GMBase.r_dsgraph_render_lods(false, true); // lods - FB
 	GMBase.r_dsgraph_render_static(1); // normal level, secondary priority
-	CParticlesAsync::Wait();
 	GMBase.r_dsgraph_render_dynamic(1, true); // normal level, secondary priority
 	L_Dynamic->render(1); // addititional light sources, secondary priority
 	GMBase.fade_render(); // faded-portals

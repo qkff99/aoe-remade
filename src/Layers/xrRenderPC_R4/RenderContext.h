@@ -16,6 +16,9 @@ bool ParallelRenderPass(const SPass& pass);
 ShadowFallback PrepareShadowPackets(CDSGraphManager& graph, class RenderContext& context, std::vector<Fmatrix>& worlds,
     bool include_static = true, std::vector<const SPass*>* passes = nullptr);
 Fvector4 CalculatePositionDecompression();
+Fvector4 CalculatePositionDecompressionDimensions();
+Fvector4 CalculateRenderJitter();
+Fvector4 CalculateUpscalerParameters();
 void MergeStatistics(const CBackend::_stats& statistics);
 class RenderContext
 {

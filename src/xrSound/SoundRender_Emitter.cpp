@@ -19,7 +19,7 @@ void CSoundRender_Emitter::set_position(const Fvector& pos)
 	bMoved = TRUE;
 }
 
-CSoundRender_Emitter::CSoundRender_Emitter(void)
+CSoundRender_Emitter::CSoundRender_Emitter(void) : p_source(false)
 {
 #ifdef DEBUG
 	static	u32			incrementalID = 0;
@@ -38,6 +38,7 @@ CSoundRender_Emitter::CSoundRender_Emitter(void)
 	set_cursor(0);
 	bMoved = TRUE;
 	b2D = FALSE;
+	bIntro = false;
 	bStopping = FALSE;
 	bRewind = FALSE;
 	iPaused = 0;
@@ -76,11 +77,12 @@ void CSoundRender_Emitter::Event_ReleaseOwner()
 void CSoundRender_Emitter::Event_Propagade()
 {
 	PROF_EVENT("CSoundRender_Emitter::Event_Propagade");
-	fTimeToPropagade += ::Random.randF(s_f_def_event_pulse - 0.030f, s_f_def_event_pulse + 0.030f);
+	static thread_local CRandom eventRandom;
+	fTimeToPropagade += eventRandom.randF(s_f_def_event_pulse - 0.030f, s_f_def_event_pulse + 0.030f);
 	if (!(owner_data)) return;
 	if (0 == owner_data->g_type) return;
-	if (0 == owner_data->g_object)return;
-	if (0 == SoundRender->Handler)return;
+	if (!owner_data->async_voice && !owner_data->g_object) return;
+	if (!owner_data->async_voice && !SoundRender->Handler) return;
 
 	VERIFY(_valid(p_source.volume));
 	// Calculate range
@@ -89,7 +91,10 @@ void CSoundRender_Emitter::Event_Propagade()
 	if (range < 0.1f) return;
 
 	// Inform objects
-	SoundRender->s_events.push_back(mk_pair(owner_data, range));
+	if (owner_data->async_voice)
+		pending_ai_range = range;
+	else
+		SoundRender->s_events.push_back(mk_pair(owner_data, range));
 }
 
 void CSoundRender_Emitter::switch_to_2D()

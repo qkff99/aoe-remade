@@ -3,7 +3,6 @@
 //----------------------------------------------------
 #include "stdafx.h"
 #include "ParticlesObject.h"
-#include "../xrParticles/ParticlesAsyncManager.h"
 #include "../xrEngine/defines.h"
 #include "../Include/xrRender/RenderVisual.h"
 #include "../Include/xrRender/ParticleCustom.h"
@@ -24,6 +23,9 @@ CParticlesObject::CParticlesObject(LPCSTR p_name, BOOL bAutoRemove, bool destroy
 
 void CParticlesObject::Init(LPCSTR p_name, IRender_Sector* S, BOOL bAutoRemove)
 {
+    simulation_xform.identity();
+    pending_xform.identity();
+    simulation_position.set(0, 0, 0);
 	m_bLooped = false;
 	m_bStopping = false;
 	m_bAutoRemove = bAutoRemove;
@@ -64,10 +66,8 @@ void CParticlesObject::Init(LPCSTR p_name, IRender_Sector* S, BOOL bAutoRemove)
 	// spatial
 	SpatialComponent->spatial.type = 0;
 	SpatialComponent->spatial.sector = S;
-
-	NeedUpdate = CParticlesAsync::NeedForceUpdate();
-
 	dwLastTime = Device.dwTimeGlobal;
+    StageRenderState();
 }
 
 //----------------------------------------------------
@@ -127,6 +127,7 @@ intrusive_ptr<CParticlesObject> Particles::Details::Create(LPCSTR p_name, BOOL b
 
 void CParticlesObject::Play(bool bHudMode)
 {
+    xrCriticalSectionGuard guard(&simulation_lock);
 	if (g_dedicated_server) return;
 
 	IParticleCustom* V = renderable.visual ? renderable.visual->dcast_ParticleCustom() : NULL;
@@ -139,16 +140,11 @@ void CParticlesObject::Play(bool bHudMode)
 
 	PerformAllTheWork();
 	m_bStopping = false;
-
-	if (NeedUpdate)
-	{
-		CParticlesAsync::ForceUpdate(this);
-		NeedUpdate = false;
-	}
 }
 
 void CParticlesObject::play_at_pos(const Fvector& pos, BOOL xform)
 {
+    xrCriticalSectionGuard guard(&simulation_lock);
 	if (g_dedicated_server) return;
 
 	IParticleCustom* V = renderable.visual ? renderable.visual->dcast_ParticleCustom() : NULL;
@@ -161,16 +157,11 @@ void CParticlesObject::play_at_pos(const Fvector& pos, BOOL xform)
 
 	PerformAllTheWork();
 	m_bStopping = false;
-
-	if (NeedUpdate)
-	{
-		CParticlesAsync::ForceUpdate(this);
-		NeedUpdate = false;
-	}
 }
 
 void CParticlesObject::Stop(BOOL bDefferedStop)
 {
+    xrCriticalSectionGuard guard(&simulation_lock);
 	if (g_dedicated_server) return;
 
 	IParticleCustom* V = renderable.visual ? renderable.visual->dcast_ParticleCustom() : NULL;
@@ -181,55 +172,81 @@ void CParticlesObject::Stop(BOOL bDefferedStop)
 
 void CParticlesObject::Update(u32 _dt)
 {
-	inherited::shedule_Update(_dt);
+    xrCriticalSectionGuard guard(&simulation_lock);
+    inherited::shedule_Update(_dt);
+}
 
-	if (g_dedicated_server)
-		return;
+void CParticlesObject::Simulate(u32 dt)
+{
+    xrCriticalSectionGuard guard(&simulation_lock);
+    if (g_dedicated_server || m_bDead) return;
+    auto* visual = renderable.visual ? renderable.visual->dcast_ParticleCustom() : nullptr;
+    if (!visual) return;
+    visual->OnFrame(dt);
+    StageRenderState();
+}
 
-	if (m_bDead)
-		return;
+void CParticlesObject::StageRenderState()
+{
+    if (g_dedicated_server || !renderable.visual) return;
+    auto* visual = renderable.visual->dcast_ParticleCustom();
+    auto state = visual->CaptureRenderState();
+    simulation_position.add(state->bounds.min, state->bounds.max).mul(0.5f);
+    xrCriticalSectionGuard guard(&snapshot_lock);
+    pending_frame = std::move(state);
+    pending_xform = simulation_xform;
+}
 
-	UpdateSpatial();
+bool CParticlesObject::PublishRenderState()
+{
+    IParticleCustom::RenderStatePtr state;
+    Fmatrix transform;
+    {
+        xrCriticalSectionGuard guard(&snapshot_lock);
+        state.swap(pending_frame);
+        transform = pending_xform;
+    }
+    if (!state || m_bDead) return false;
+    renderable.visual->dcast_ParticleCustom()->PublishRenderState(state);
+    renderable.xform = transform;
+    UpdateSpatial();
+    return true;
 }
 
 void CParticlesObject::PerformAllTheWork()
 {
+	xrCriticalSectionGuard guard(&simulation_lock);
 	if (g_dedicated_server) return;
 
 	// Update
-	UpdateSpatial();
+	StageRenderState();
 }
 
 void CParticlesObject::SetXFORM(const Fmatrix& m)
 {
+    xrCriticalSectionGuard guard(&simulation_lock);
 	if (g_dedicated_server) return;
 
 	IParticleCustom* V = renderable.visual ? renderable.visual->dcast_ParticleCustom() : NULL;
 	VERIFY(V);
 	V->UpdateParent(m, zero_vel,TRUE);
-	renderable.xform.set(m);
-	UpdateSpatial();
+	simulation_xform.set(m);
 }
 
 void CParticlesObject::UpdateParent(const Fmatrix& m, const Fvector& vel)
 {
+    xrCriticalSectionGuard guard(&simulation_lock);
 	if (g_dedicated_server) return;
 
 	IParticleCustom* V = renderable.visual ? renderable.visual->dcast_ParticleCustom() : NULL;
 	VERIFY(V);
 	V->UpdateParent(m, vel,FALSE);
-	UpdateSpatial();
 }
 
-Fvector& CParticlesObject::Position()
+Fvector CParticlesObject::Position()
 {
-	if (g_dedicated_server)
-	{
-		static Fvector _pos = Fvector().set(0, 0, 0);
-		return _pos;
-	}
-	vis_data& vis = renderable.visual->getVisData();
-	return vis.sphere.P;
+    xrCriticalSectionGuard guard(&simulation_lock);
+    return simulation_position;
 }
 
 float CParticlesObject::shedule_Scale()
@@ -256,12 +273,14 @@ bool CParticlesObject::IsAutoRemove()
 
 void CParticlesObject::SetAutoRemove(bool auto_remove)
 {
+    xrCriticalSectionGuard guard(&simulation_lock);
 	VERIFY(m_bStopping || !IsLooped());
 	m_bAutoRemove = auto_remove;
 }
 
 void CParticlesObject::SetHudMode(bool bHudMode)
 {
+    xrCriticalSectionGuard guard(&simulation_lock);
 	if (g_dedicated_server) return;
 
 	IParticleCustom* V = renderable.visual ? renderable.visual->dcast_ParticleCustom() : NULL;
@@ -271,6 +290,7 @@ void CParticlesObject::SetHudMode(bool bHudMode)
 
 void CParticlesObject::SetLiveUpdate(BOOL b)
 {
+    xrCriticalSectionGuard guard(&simulation_lock);
 	if(g_dedicated_server)		return;
 
 	IParticleCustom* V = renderable.visual ? renderable.visual->dcast_ParticleCustom() : NULL;
@@ -280,6 +300,7 @@ void CParticlesObject::SetLiveUpdate(BOOL b)
 
 BOOL CParticlesObject::GetLiveUpdate()
 {
+    xrCriticalSectionGuard guard(&simulation_lock);
 	if(g_dedicated_server)		return FALSE;
 
 	IParticleCustom* V = renderable.visual ? renderable.visual->dcast_ParticleCustom() : NULL;
@@ -291,6 +312,7 @@ BOOL CParticlesObject::GetLiveUpdate()
 //остановки Stop партиклы могут еще доигрывать анимацию IsPlaying = true
 bool CParticlesObject::IsPlaying()
 {
+    xrCriticalSectionGuard guard(&simulation_lock);
 	if (g_dedicated_server) return false;
 
 	IParticleCustom* V = renderable.visual ? renderable.visual->dcast_ParticleCustom() : NULL;

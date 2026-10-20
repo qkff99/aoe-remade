@@ -21,6 +21,8 @@
 #if XRCORE_PROFILER == PROFILER_OPTICK
 #	include "../3rd party/optick-git/src/optick.h"
 
+void XRCORE_API xrOptickEnableThreadTags();
+
 struct xrOptickThreadScope
 {
     xrOptickThreadScope(const xrOptickThreadScope&) = delete;
@@ -29,13 +31,19 @@ struct xrOptickThreadScope
     explicit xrOptickThreadScope(const char* name, bool enabled = true) : registered(enabled)
     {
         if (registered && Depth()++ == 0 && !*Optick::GetEventStorageSlotForCurrentThread())
+        {
             owns_registration = Optick::RegisterThread(name);
+            xrOptickEnableThreadTags();
+        }
     }
 
     explicit xrOptickThreadScope(const wchar_t* name, bool enabled = true) : registered(enabled)
     {
         if (registered && Depth()++ == 0 && !*Optick::GetEventStorageSlotForCurrentThread())
+        {
             owns_registration = Optick::RegisterThread(name);
+            xrOptickEnableThreadTags();
+        }
     }
 
     ~xrOptickThreadScope()

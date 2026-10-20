@@ -26,6 +26,55 @@
 // calling Load() inline.
 extern xr_task_group textures_load_tasks;
 
+static void BindPendingTexture(u32 stage)
+{
+    if (stage < CTexture::rstVertex) SRVSManager.SetPSResource(stage, nullptr);
+    else if (stage < CTexture::rstGeometry) SRVSManager.SetVSResource(stage - CTexture::rstVertex, nullptr);
+    else if (stage < CTexture::rstHull) SRVSManager.SetGSResource(stage - CTexture::rstGeometry, nullptr);
+#ifdef USE_DX11
+    else if (stage < CTexture::rstDomain) SRVSManager.SetHSResource(stage - CTexture::rstHull, nullptr);
+    else if (stage < CTexture::rstCompute) SRVSManager.SetDSResource(stage - CTexture::rstDomain, nullptr);
+    else if (stage < CTexture::rstInvalid) SRVSManager.SetCSResource(stage - CTexture::rstCompute, nullptr);
+#endif
+}
+
+void CTexture::Bind(u32 stage)
+{
+#ifdef USE_DX11
+    extern ENGINE_API BOOL g_appLoaded;
+    if (g_appLoaded && !Device.dwPrecacheFrame && streamable)
+    {
+        if (!cs.TryEnter())
+        {
+            PROF_EVENT("Texture.Bind.Pending");
+            BindPendingTexture(stage);
+            return;
+        }
+        bool pending;
+        {
+            struct Unlock { xrCriticalSection& lock; ~Unlock() { lock.Leave(); } } unlock{cs};
+            pending = !flags.bLoaded || flags.bLoadedAsStaging;
+            if (!pending) { bind(stage); return; }
+        }
+        ref_texture self(this);
+        DEV->QueueTextureLoad(self);
+        PROF_EVENT("Texture.Bind.Pending");
+        BindPendingTexture(stage);
+        return;
+    }
+#endif
+    xrCriticalSectionGuard guard(cs);
+    bind(stage);
+}
+
+ID3DShaderResourceView* CTexture::RenderView()
+{
+    if (!cs.TryEnter()) return nullptr;
+    ID3DShaderResourceView* view = flags.bLoaded && !flags.bLoadedAsStaging ? m_pSRView : nullptr;
+    cs.Leave();
+    return view;
+}
+
 void resptrcode_texture::create(LPCSTR _name)
 {
 	PROF_EVENT("resptrcode_texture::create");
@@ -67,10 +116,7 @@ CTexture::~CTexture()
 
 void CTexture::surface_set(ID3DBaseTexture* surf)
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 
 	if (cName.size() && strstr(cName.c_str(), "$user$"))
 		flags.bUser = true;
@@ -138,10 +184,7 @@ void CTexture::surface_set(ID3DBaseTexture* surf)
 
 ID3DBaseTexture* CTexture::surface_get()
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 	if (flags.bLoadedAsStaging)
 		ProcessStaging();
 
@@ -151,6 +194,7 @@ ID3DBaseTexture* CTexture::surface_get()
 
 void CTexture::PostLoad()
 {
+    xrCriticalSectionGuard guard(cs);
 	if (pTheora) bind = xr_make_delegate(this, &CTexture::apply_theora);
 	else if (pAVI) bind = xr_make_delegate(this, &CTexture::apply_avi);
 	else if (!seqDATA.empty()) bind = xr_make_delegate(this, &CTexture::apply_seq);
@@ -158,53 +202,17 @@ void CTexture::PostLoad()
 	else bind = xr_make_delegate(this, &CTexture::apply_normal);
 }
 
-void CTexture::apply_load(u32 dwStage)
+void CTexture::apply_load(u32 stage)
 {
-    if (!flags.bLoaded)
-    {
-        // Never loaded, or just dropped by EvictStalledTextures(). Load() ends up in
-        // D3DX11CreateTextureFromMemory, which races the resource thread if run inline
-        // here (this can run on the render thread mid-gameplay just as easily as on a
-        // loading-screen thread during level load - neither is safe in the MT build).
-        // Queue the (re)load the same way _CreateTexture() does for new textures instead;
-        // bLoading guards against re-queuing every call while that's in flight.
-        if (!flags.bLoading)
-        {
-#ifdef DEBUG
-            Msg("* [TexReload] queued: %s", cName.c_str());
-#endif // DEBUG
-            ref_texture self(this);
-            const DWORD owner_thread = GetCurrentThreadId();
-            textures_load_tasks.run([self, owner_thread]()
-            {
-                PROF_THREAD_IF(owner_thread != GetCurrentThreadId(), "X-Ray PPL Thread");
-                self->Load();
-            });
-        }
-        // Bind nothing (or whatever is already there, e.g. mid-flight from an
-        // in-flight Load()) for this call. apply_normal() waits out any in-flight
-        // load, so this never touches D3D resources that are being created
-        // concurrently. Once the queued Load() completes, PostLoad() re-points
-        // `bind` at the real apply_* handler and subsequent calls stop landing here.
-        apply_normal(dwStage);
-        return;
-    }
-
-    PostLoad();
-    if (bind == xr_make_delegate(this, &CTexture::apply_load))
-    {
-        // This should not happen - if bind is still apply_load, fall back to apply_normal
-        // which will just apply the (potentially unloaded) surface
-        apply_normal(dwStage);
-    }
-    else
-    {
-        bind(dwStage);
-    }
+    xrCriticalSectionGuard guard(cs);
+    if (!flags.bLoaded) Load();
+    else PostLoad();
+    bind(stage);
 };
 
 void CTexture::ProcessStaging()
 {
+    xrCriticalSectionGuard guard(cs);
 	VERIFY(pSurface);
 	VERIFY(flags.bLoadedAsStaging);
 
@@ -288,10 +296,7 @@ void CTexture::ProcessStaging()
 
 void CTexture::Apply(u32 dwStage)
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 	dwLastUsedFrame = RDEVICE.dwFrame;
 
 	if (flags.bLoadedAsStaging)
@@ -345,10 +350,7 @@ void CTexture::Apply(u32 dwStage)
 
 void CTexture::apply_theora(u32 dwStage)
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 	if (pTheora->Update(m_play_time != 0xFFFFFFFF ? m_play_time : Device.dwTimeContinual))
 	{
 		D3D_RESOURCE_DIMENSION type;
@@ -388,10 +390,7 @@ void CTexture::apply_theora(u32 dwStage)
 
 void CTexture::apply_avi(u32 dwStage)
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 	if (pAVI->NeedUpdate())
 	{
 		D3D_RESOURCE_DIMENSION type;
@@ -424,10 +423,7 @@ void CTexture::apply_avi(u32 dwStage)
 
 void CTexture::apply_seq(u32 dwStage)
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 	// SEQ
 	u32 frame = Device.dwTimeContinual / seqMSPF; //Device.dwTimeGlobal
 	u32 frame_data = seqDATA.size();
@@ -450,10 +446,7 @@ void CTexture::apply_seq(u32 dwStage)
 
 void CTexture::apply_gif(u32 dwStage)
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 	if (gifPlayer->UpdateFrame())
 	{
         const CGIFAnimationPlayer::Frame* const gifFrame = gifPlayer->GetActiveFrame();
@@ -467,10 +460,7 @@ void CTexture::apply_gif(u32 dwStage)
 
 void CTexture::apply_normal(u32 dwStage)
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 	//CHK_DX(HW.pDevice->SetTexture(dwStage,pSurface));
 	Apply(dwStage);
 };
@@ -482,14 +472,26 @@ void CTexture::Preload()
 	m_bumpmap = DEV->m_textures_description.GetBumpName(cName);
 	}
 	m_material = DEV->m_textures_description.GetMaterial(cName);
+#ifdef USE_DX11
+    string_path path;
+    streamable = cName.size() && cName.c_str()[0] != '$' &&
+        !FS.exist(path, "$game_textures$", cName.c_str(), ".ogm") &&
+        !FS.exist(path, "$game_textures$", cName.c_str(), ".avi") &&
+        !FS.exist(path, "$game_textures$", cName.c_str(), ".seq") &&
+        !FS.exist(path, "$game_textures$", cName.c_str(), ".gif");
+#endif
 }
 
-void CTexture::Load()
+void CTexture::Load(bool renderReady)
 {
+    xrCriticalSectionGuard guard(cs);
 	PROF_EVENT("CTexture::Load");
     PROF_TAG("Texture", cName.c_str());
 
-	if (flags.bLoaded || flags.bLoading) return;
+#ifdef USE_DX11
+    if (renderReady && flags.bLoadedAsStaging) Unload();
+#endif
+    if (flags.bLoaded || flags.bLoading) return;
 	flags.bLoading = true;
 	flags.bLoaded = false;
 	desc_cache = 0;
@@ -516,7 +518,6 @@ void CTexture::Load()
 		return;
 	}
 
-	Preload();
 
 	bool bCreateView = true;
 
@@ -686,7 +687,7 @@ void CTexture::Load()
 		// Normal texture
 		u32 mem = 0;
 		//pSurface = ::RImplementation.texture_load	(*cName,mem);
-		pSurface = ::RImplementation.texture_load(*cName, mem, true);
+		pSurface = ::RImplementation.texture_load(*cName, mem, !renderReady);
 
 		if (GetUsage() == D3D_USAGE_STAGING)
 		{
@@ -711,10 +712,7 @@ void CTexture::Load()
 
 void CTexture::Unload()
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 
 	// Already unloaded or never loaded: nothing to do.
 	if (!flags.bLoaded)
@@ -762,10 +760,7 @@ void CTexture::Unload()
 
 void CTexture::desc_update()
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 	desc_cache = pSurface;
 	if (pSurface)
 	{
@@ -826,36 +821,24 @@ D3D_USAGE CTexture::GetUsage()
 
 void CTexture::video_Play(BOOL looped, u32 _time)
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 	if (pTheora) pTheora->Play(looped, (_time != 0xFFFFFFFF) ? (m_play_time = _time) : Device.dwTimeContinual);
 }
 
 void CTexture::video_Pause(BOOL state)
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 	if (pTheora) pTheora->Pause(state);
 }
 
 void CTexture::video_Stop()
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 	if (pTheora) pTheora->Stop();
 }
 
 BOOL CTexture::video_IsPlaying()
 {
-	while (flags.bLoading)
-	{
-		SwitchToThread();
-	}
+    xrCriticalSectionGuard guard(cs);
 	return (pTheora) ? pTheora->IsPlaying() : FALSE;
 }

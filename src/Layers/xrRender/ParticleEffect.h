@@ -29,6 +29,25 @@ namespace PS
 
 		Fvector m_InitialPosition;
 	public:
+        struct EffectFrame : RenderState
+        {
+            xr_vector<PAPI::Particle> particles;
+            Flags32 flags;
+            Flags8 runtime_flags;
+            SFrame frame;
+            Fvector velocity_scale, default_rotation;
+            Fmatrix transform;
+            ref_shader render_shader;
+        };
+        RenderStatePtr CaptureRenderState() override;
+        void PublishRenderState(const RenderStatePtr& state) override;
+    private:
+        std::shared_ptr<EffectFrame> frame_buffers[2];
+        std::shared_ptr<const EffectFrame> published_frame;
+        u32 next_frame_buffer = 0, last_render_frame = 0;
+        xr_vector<PAPI::Particle> render_particles, render_scratch;
+        xr_unordered_map<u64, u32> render_indices;
+    public:
 		CPEDef* m_Def;
 		Fmatrix m_XFORM;
 	protected:

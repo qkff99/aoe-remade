@@ -1,10 +1,19 @@
 #ifndef	ParticleCustom_included
 #define	ParticleCustom_included
 #pragma once
+#include <memory>
 
 class IParticleCustom
 {
 public:
+    struct RenderState
+    {
+        Fbox bounds;
+        virtual ~RenderState() = default;
+    };
+    using RenderStatePtr = std::shared_ptr<const RenderState>;
+    virtual RenderStatePtr CaptureRenderState() = 0;
+    virtual void PublishRenderState(const RenderStatePtr& state) = 0;
 	virtual ~IParticleCustom() { ; }
 
 	virtual void OnDeviceCreate() =0;

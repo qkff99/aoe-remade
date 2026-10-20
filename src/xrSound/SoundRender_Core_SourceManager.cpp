@@ -7,6 +7,7 @@
 
 CSoundRender_Source* CSoundRender_Core::i_create_source(LPCSTR name)
 {
+	xrCriticalSectionGuard guard(&sources_lock);
 	// Search
 	string256 id;
 	xr_strcpy(id, name);

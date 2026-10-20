@@ -364,6 +364,9 @@
     <ClInclude Include="NotificationClient.h" />
     <ClInclude Include="OpenALDeviceList.h" />
     <ClInclude Include="Sound.h" />
+    <ClInclude Include="SoundDecodeQueue.h" />
+    <ClInclude Include="SoundAsync.h" />
+    <ClInclude Include="SoundRuntimeSettings.h" />
     <ClInclude Include="SoundRender.h" />
     <ClInclude Include="SoundRender_Cache.h" />
     <ClInclude Include="SoundRender_Core.h" />
@@ -393,6 +396,8 @@
     <ClCompile Include="NotificationClient.cpp" />
     <ClCompile Include="OpenALDeviceList.cpp" />
     <ClCompile Include="sound.cpp" />
+    <ClCompile Include="SoundDecodeQueue.cpp" />
+    <ClCompile Include="SoundAsync.cpp" />
     <ClCompile Include="SoundRender_Cache.cpp" />
     <ClCompile Include="SoundRender_Core.cpp" />
     <ClCompile Include="SoundRender_CoreA.cpp" />

@@ -1228,6 +1228,31 @@ bool CLevel::Load(u32 dwNum)
 static u32 lua_gc_completed_cycles = 0;
 static u32 lua_gc_seen_generation = 0;
 
+namespace
+{
+unsigned long long XRayLuaGCAtomicProfileClock()
+{
+    return static_cast<unsigned long long>(CPU::QPC());
+}
+
+void XRayReportLuaGCAtomicProfile(lua_State* state)
+{
+    lua_XRayGCAtomicProfile profile{};
+    if (!lua_xray_gc_atomic_profile_snapshot(state, &profile) || !CPU::qpc_freq)
+        return;
+    const double ticks_to_ms = 1000.0 / double(CPU::qpc_freq);
+    PROF_EVENT("LuaGC.Atomic.Breakdown");
+    PROF_TAG("Atomic total ms", float(profile.total_ticks * ticks_to_ms));
+    PROF_TAG("Atomic roots ms", float(profile.roots_ticks * ticks_to_ms));
+    PROF_TAG("Atomic grayagain ms", float(profile.grayagain_ticks * ticks_to_ms));
+    PROF_TAG("Atomic separate userdata ms", float(profile.separateudata_ticks * ticks_to_ms));
+    PROF_TAG("Atomic mark userdata ms", float(profile.mmudata_ticks * ticks_to_ms));
+    PROF_TAG("Atomic weak sweep ms", float(profile.weak_sweep_ticks * ticks_to_ms));
+    PROF_TAG("Atomic scanned userdata", u64(profile.userdata_scanned));
+    PROF_TAG("Atomic candidate userdata", u64(profile.userdata_candidates));
+}
+}
+
 bool CLevel::RestoreLuaGCBindings()
 {
     if (!Device.LuaGC) Device.LuaGC.bind(&CLevel::LuaGC);
@@ -1242,6 +1267,7 @@ void CLevel::LuaGCPrepare(bool always)
     if (g_dedicated_server) return;
     lua_State* state = ai().script_engine().lua();
     if (!state) return;
+    lua_xray_gc_atomic_profile_configure(state, &XRayLuaGCAtomicProfileClock);
     lua_gcincremental(state, always ? 1 : 0);
     lua_gc(state, always ? LUA_GCSTOP : LUA_GCRESTART, 0);
 }
@@ -1270,12 +1296,17 @@ int CLevel::LuaGC()
     lua_State* state = ai().script_engine().lua();
     if (!state) return -1;
     if (!Device.LuaGCAlwaysActive())
-        return lua_gc(state, LUA_GCSTEP, psLua_ParallelGCStep);
+    {
+        const int result = lua_gc(state, LUA_GCSTEP, psLua_ParallelGCStep);
+        XRayReportLuaGCAtomicProfile(state);
+        return result;
+    }
     R_ASSERT(Device.IsGameLogicThread());
     const int result = lua_gcstep_one(state, 1);
     // Keep allocation-triggered collection stopped between explicit slices.
     lua_gc(state, LUA_GCSTOP, 0);
     if (result) ++lua_gc_completed_cycles;
+    XRayReportLuaGCAtomicProfile(state);
     return result;
 }
 void CLevel::LuaGCDebug()

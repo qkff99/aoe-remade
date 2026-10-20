@@ -4,11 +4,14 @@
 #include "SoundRender_Environment.h"
 #include "SoundRender_Cache.h"
 #include "SoundRender_Source.h"
+#include "SoundRuntimeSettings.h"
 
 class CNotificationClient;
 
 class CSoundRender_Core : public CSound_manager_interface
 {
+	friend class AsyncSound;
+	xrCriticalSection sources_lock;
 	volatile BOOL bLocked;
     xrCriticalSection deferred_destroy_lock;
     xr_vector<ref_sound_data_ptr> deferred_destroy_queue;
@@ -18,8 +21,9 @@ protected:
 	virtual void _destroy_data(ref_sound_data& S);
 	CNotificationClient* pSysNotification = nullptr;
 public:
-	volatile BOOL bPendingDefaultDeviceSwitch = FALSE;
-	volatile BOOL bPendingDeviceListRefresh = FALSE;
+	void wait_for_streaming() override;
+	std::atomic_bool bPendingDefaultDeviceSwitch{false};
+	std::atomic_bool bPendingDeviceListRefresh{false};
 protected:
 	BOOL bListenerMoved;
 
@@ -64,6 +68,7 @@ protected:
 public:
 	// Cache
 	CSoundRender_Cache cache;
+	SoundRuntimeSettings runtime;
 	u32 cache_bytes_per_line;
 
 public:

@@ -202,6 +202,8 @@ dxRender_Visual* CModelPool::Instance_Register(LPCSTR N, dxRender_Visual* V)
 
 void CModelPool::Destroy()
 {
+    DeleteQueuedDeffer();
+    DeleteQueue();
 	// Pool
 	Pool.clear();
 
@@ -389,10 +391,11 @@ void CModelPool::Delete(dxRender_Visual* &V, BOOL bDiscard)
 {
 	if (nullptr==V)
 		return;
-	if (g_bRendering)
+	const auto* particle = static_cast<dxParticleCustom*>(V->dcast_ParticleCustom());
+	if (g_bRendering || (particle && particle->render_references()))
 	{
-		VERIFY(!bDiscard);
-		ModelsToDelete.push_back(V);
+		xrCriticalSectionGuard guard(&deffered_del_lock);
+		ModelsToDelete.emplace_back(V, bDiscard);
 	}
 	else
 	{
@@ -403,22 +406,49 @@ void CModelPool::Delete(dxRender_Visual* &V, BOOL bDiscard)
 
 void CModelPool::DeleteQueue()
 {
-	for (u32 it = 0; it < ModelsToDelete.size(); it++)
-		DeleteInternal(ModelsToDelete[it]);
-	ModelsToDelete.clear();
+	PROF_EVENT("Particles.ModelRetire");
+	for (;;)
+	{
+		xr_vector<std::pair<dxRender_Visual*, BOOL>> batch, pending;
+		{
+			xrCriticalSectionGuard guard(&deffered_del_lock);
+			batch.swap(ModelsToDelete);
+		}
+		if (batch.empty()) return;
+		u32 deleted = 0;
+		for (auto& request : batch)
+		{
+			const auto* particle = static_cast<dxParticleCustom*>(request.first->dcast_ParticleCustom());
+			if (particle && particle->render_references()) pending.push_back(request);
+			else
+			{
+				DeleteInternal(request.first, request.second);
+				++deleted;
+			}
+		}
+		{
+			xrCriticalSectionGuard guard(&deffered_del_lock);
+			ModelsToDelete.insert(ModelsToDelete.end(), pending.begin(), pending.end());
+		}
+		// Deleting a parent can release the final child snapshot.
+		if (!deleted) return;
+	}
 }
 
 void CModelPool::DeleteQueuedDeffer()
 {
 	xrCriticalSectionGuard guard(&deffered_del_lock);
 
-    for (dxRender_Visual* Vis : ModelsToDeleteDeffer)
+    while (!ModelsToDeleteDeffer.empty())
     {
-        if (Vis)
-            DeleteInternal(Vis);
-    }	
-
-	ModelsToDeleteDeffer.clear();
+        xr_vector<dxRender_Visual*> batch;
+        batch.swap(ModelsToDeleteDeffer);
+        for (dxRender_Visual* Vis : batch)
+        {
+            if (Vis)
+                Delete(Vis);
+        }
+    }
 }
 
 void CModelPool::Discard(dxRender_Visual* & V, BOOL b_complete)

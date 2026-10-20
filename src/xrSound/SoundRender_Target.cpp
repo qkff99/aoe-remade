@@ -40,7 +40,7 @@ void CSoundRender_Target::start(CSoundRender_Emitter* E)
 	// 5. Deferred-play-signal (emitter-exist, rendering-false)
 	m_pEmitter = E;
 	rendering = FALSE;
-	attach();
+	// PCM requests open the stream in the loader; the legacy fallback is lazy.
 }
 
 void CSoundRender_Target::render()
@@ -57,7 +57,7 @@ void CSoundRender_Target::stop()
 
 void CSoundRender_Target::rewind()
 {
-	R_ASSERT(rendering);
+	R_ASSERT(m_pEmitter);
 }
 
 void CSoundRender_Target::update()

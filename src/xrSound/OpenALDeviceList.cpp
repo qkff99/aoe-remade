@@ -67,13 +67,11 @@ ALDeviceList::~ALDeviceList()
 	free_devices_token();
 }
 
-void ALDeviceList::Enumerate()
+void ALDeviceList::Enumerate(bool publishTokens)
 {
 	int	ALmajor, ALminor, EFXmajor, EFXminor, index;
 
 	Msg("SOUND: OpenAL: enumerate devices...");
-
-	free_devices_token();
 
 	// have a set of vectors storing the device list, selection status, spec version #, and XRAM support status
 	// -- empty all the lists and reserve space for 10 devices
@@ -144,15 +142,11 @@ void ALDeviceList::Enumerate()
 	else
 		Msg("SOUND: OpenAL: EnumerationExtension NOT Present");
 
-	//make token
-	u32 _cnt = GetNumDevices();
-	snd_devices_token = xr_alloc<xr_token>(_cnt + 1);
-	snd_devices_token[_cnt].id = -1;
-	snd_devices_token[_cnt].name = nullptr;
-	for (u32 i = 0; i < _cnt; ++i)
+	if (publishTokens)
 	{
-		snd_devices_token[i].id = i;
-		snd_devices_token[i].name = xr_strdup(m_devices[i].name);
+		xr_vector<xr_string> names;
+		CopyNames(names);
+		PublishSoundDeviceTokens(names);
 	}
 	//--
 
@@ -176,7 +170,26 @@ void ALDeviceList::Enumerate()
 
 LPCSTR ALDeviceList::GetDeviceName(u32 index)
 {
-	return snd_devices_token[index].name;
+	return m_devices[index].name;
+}
+
+void ALDeviceList::CopyNames(xr_vector<xr_string>& names) const
+{
+	names.clear();
+	for (const auto& device : m_devices) names.emplace_back(device.name);
+}
+
+void PublishSoundDeviceTokens(const xr_vector<xr_string>& names)
+{
+	free_devices_token();
+	snd_devices_token = xr_alloc<xr_token>(names.size() + 1);
+	for (size_t i = 0; i < names.size(); ++i)
+	{
+		snd_devices_token[i].id = int(i);
+		snd_devices_token[i].name = xr_strdup(names[i].c_str());
+	}
+	snd_devices_token[names.size()].id = -1;
+	snd_devices_token[names.size()].name = nullptr;
 }
 
 const ALDeviceDesc* ALDeviceList::GetDeviceDescByName(LPCSTR name)

@@ -41,6 +41,8 @@ public:
 	virtual void Play(bool bHudMode) = 0;
 	virtual BOOL Locked() { return FALSE; }
 	virtual void Update(u32 dt) {};
+	virtual void Simulate(u32 dt) {}
+	virtual bool PublishRenderState() { return false; }
 
 	virtual shared_str shedule_Name() const { return shared_str("particle_instance"); };
 

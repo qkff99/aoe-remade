@@ -245,18 +245,9 @@ typedef struct GCudata {
   GCRef env;		/* Should be at same offset in GCfunc. */
   MSize len;		/* Size of payload. */
   GCRef metatable;	/* Must be at same offset in GCtab. */
-  GCRef nextud;	/* Next object in the dedicated userdata list. */
-  GCRef prevud;	/* Previous object in the dedicated userdata list. */
-  GCRef nextfin;	/* Next userdata awaiting finalization. */
-  GCRef nextcand;	/* Next incremental finalizer candidate. */
-  uint32_t align1;	/* To force 8 byte alignment of the payload. */
+  GCRef scanprev;	/* Prepass predecessor; occupies the old alignment word. */
 } GCudata;
 
-#define udref(r)	(&gcref((r))->ud)
-#define udnext(ud)	udref((ud)->nextud)
-#define udprev(ud)	udref((ud)->prevud)
-#define udfinnext(ud)	udref((ud)->nextfin)
-#define udcandnext(ud)	udref((ud)->nextcand)
 
 /* Userdata types. */
 enum {
@@ -504,19 +495,20 @@ typedef struct GCState {
   uint8_t currentwhite;	/* Current white color. */
   uint8_t state;	/* GC state. */
   uint8_t nocdatafin;	/* No cdata finalizer called. */
-  uint8_t incremental;	/* Explicit resumable engine collector mode. */
+  uint8_t incremental;  /* Resumable engine remark mode. */
   MSize sweepstr;	/* Sweep position in string table. */
   GCRef root;		/* List of all collectable objects. */
   MRef sweep;		/* Sweep position in root list. */
   GCRef gray;		/* List of gray objects. */
   GCRef grayagain;	/* List of objects for atomic traversal. */
   GCRef weak;		/* List of weak tables (to be cleared). */
-  GCRef mmudata;	/* Circular list of swept cdata awaiting finalization. */
-  GCRef udata;		/* Circular list of all userdata objects. */
-  GCRef udfin;		/* Circular list of userdata awaiting finalization. */
-  GCRef udscan;	/* Current incremental userdata scan position. */
-  GCRef udscanstop;	/* Last userdata included in the current scan. */
-  GCRef udcandidate;	/* Circular list of possible finalizers. */
+  GCRef mmudata;	/* List of userdata (to be finalized). */
+  GCRef udscanprev;	/* Last retained userdata in the native finalizer suffix. */
+  GCRef udscananchor, udheadgap;  /* Logical order across detached candidates. */
+  GCRef udcandidate, udcandidate_tail;  /* Oldest prepared candidates first. */
+  GCRef udbatch, udbatch_tail;  /* Candidates from the current scan batch. */
+  uint32_t udscanned_count, udcandidate_count;
+  uint8_t udscanmode;	/* No scan, full suffix, new prefix, or ready. */
   MSize stepmul;	/* Incremental GC step granularity. */
   MSize debt;		/* Debt (how much GC is behind schedule). */
   MSize estimate;	/* Estimate of memory actually in use. */

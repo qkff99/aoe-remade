@@ -47,7 +47,8 @@ private:
 	xr_vector<ALDeviceDesc> m_devices;
 	string256 m_defaultDeviceName;
 public:
-	void Enumerate();
+	void Enumerate(bool publishTokens = true);
+	void CopyNames(xr_vector<xr_string>& names) const;
 	ALDeviceList();
 	~ALDeviceList();
 
@@ -59,5 +60,7 @@ public:
 	void GetDeviceVersion(u32 index, int* ALmajor, int* ALminor, int* EFXmajor, int* EFXminor);
 	void SelectBestDevice();
 };
+
+void PublishSoundDeviceTokens(const xr_vector<xr_string>& names);
 
 #endif // ALDEVICELIST_H

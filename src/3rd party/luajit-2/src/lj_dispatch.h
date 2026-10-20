@@ -78,6 +78,9 @@ typedef struct GG_State {
   HotCount hotcount[HOTCOUNT_SIZE];	/* Hot counters. */
 #endif
   ASMFunction dispatch[GG_LEN_DISP];	/* Instruction dispatch tables. */
+  lua_XRayGCAtomicProfile xray_gc_atomic_profile;
+  lua_XRayGCTickFunction xray_gc_atomic_clock;
+  unsigned long long xray_gc_atomic_consumed_sequence;
   BCIns bcff[GG_NUM_ASMFF];		/* Bytecode for ASM fast functions. */
 } GG_State;
 

@@ -2,6 +2,7 @@
 #pragma hdrstop
 
 #include "SoundRender_CoreA.h"
+#include "SoundAsync.h"
 
 XRSOUND_API xr_token* snd_devices_token = NULL;
 XRSOUND_API xr_string snd_device_name;
@@ -12,7 +13,7 @@ void CSound_manager_interface::_create(int stage)
 	{
 		SoundRenderA = xr_new<CSoundRender_CoreA>();
 		SoundRender = SoundRenderA;
-		Sound = SoundRender;
+		Sound = CreateAsyncSound(SoundRenderA);
 
 		if (Core.ParamsData.test(ECoreParams::nosound))
 		{
@@ -31,5 +32,6 @@ void CSound_manager_interface::_destroy()
 {
 	Sound->_clear();
 	xr_delete(SoundRender);
-	Sound = 0;
+	SoundRenderA = nullptr;
+	xr_delete(Sound);
 }

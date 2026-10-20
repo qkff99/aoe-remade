@@ -5,6 +5,7 @@ namespace PAPI
 	// A effect of particles - Info and an array of Particles
 	struct ParticleEffect : public intrusive_base
 	{
+		u64 next_render_id = 0;
 		u32 p_count;				// Number of particles currently existing.
 		u32 max_particles;			// Max particles allowed in effect.
 		u32 particles_allocated;	// Actual allocated size.

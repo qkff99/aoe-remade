@@ -126,6 +126,12 @@ Fvector4 CalculatePositionDecompression()
     return parameters.set(horz_tan + jitter.x * sx, vert_tan + jitter.y * sy, sx, sy);
 }
 
+Fvector4 CalculatePositionDecompressionDimensions()
+{
+    return Fvector4().set(float(RenderScreenWidth()), float(RenderScreenHeight()),
+        1.0f / RenderScreenWidth(), 1.0f / RenderScreenHeight());
+}
+
 static class cl_pos_decompress_params : public R_constant_setup
 {
     bool parallel_safe() const override { return true; }
@@ -143,9 +149,7 @@ static class cl_pos_decompress_params2 : public R_constant_setup
 	virtual void setup(R_constant* C)
 	{
         Fvector4 value;
-        if (!ContextPositionDecompression(value, true))
-            value.set(float(RenderScreenWidth()), float(RenderScreenHeight()),
-                1.0f / RenderScreenWidth(), 1.0f / RenderScreenHeight());
+        if (!ContextPositionDecompression(value, true)) value = CalculatePositionDecompressionDimensions();
         RCache.set_c(C, value);
 	}
 } binder_pos_decompress_params2;
