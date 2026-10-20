@@ -468,6 +468,7 @@ public:
     void WaitForGameLogic();
     void JoinGameLogic(LuaGCStopReason reason = LuaGCStopReason::FrameBarrier);
     bool IsGameLogicThread() const;
+    bool CanContinueGameLogicWork() const;
     bool IsMainThread() const { return GetCurrentThreadId() == frame_main_thread; }
     void BeginLuaGCFrame();
     void FinishLuaGCFrame();

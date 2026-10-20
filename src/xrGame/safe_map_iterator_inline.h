@@ -25,6 +25,7 @@ IC CSSafeMapIterator::CSafeMapIterator()
 {
 	m_cycle_count = 0;
 	m_first_update = use_first_update;
+	m_update_in_progress = false;
 	m_max_process_time = 0.f;
 	update_next();
 }
@@ -101,9 +102,12 @@ IC void CSSafeMapIterator::start_timer()
 }
 
 TEMPLATE_SPEZIALIZATION
-IC bool CSSafeMapIterator::time_over()
+IC bool CSSafeMapIterator::time_over(bool frame_limited)
 {
-	return (use_time_limit && !m_first_update && (m_timer.GetElapsed_sec() >= m_max_process_time));
+	// Explicit frame slices also bound the first ready-level pass and registries
+	// whose legacy synchronous path uses an object-count limit only.
+	return ((use_time_limit || frame_limited) && (frame_limited || !m_first_update) &&
+		(m_timer.GetElapsed_sec() >= m_max_process_time));
 }
 
 TEMPLATE_SPEZIALIZATION
@@ -120,22 +124,43 @@ IC const typename CSSafeMapIterator::_REGISTRY&CSSafeMapIterator::objects() cons
 
 TEMPLATE_SPEZIALIZATION
 template <typename _update_predicate>
-IC u32 CSSafeMapIterator::update(const _update_predicate& predicate, bool const iterate_as_first_time_next_time)
+IC u32 CSSafeMapIterator::update(const _update_predicate& predicate, bool const iterate_as_first_time_next_time,
+	bool* completed, bool (*can_continue)())
 {
+	if (completed)
+		*completed = true;
 	if (empty())
+	{
+		m_update_in_progress = false;
 		return (0);
+	}
 
 	start_timer();
-	++m_cycle_count;
+	if (!completed || !m_update_in_progress)
+		++m_cycle_count;
 	_iterator I = next();
 	VERIFY(I != m_objects.end());
 	u32 i = 0;
-	for (; (I != m_objects.end()) && !time_over() && predicate(I, m_cycle_count, true); ++i)
+	bool finished = true;
+	for (; I != m_objects.end(); ++i)
 	{
+		// A joined Lua owner cannot start another object. While the window is
+		// open, admit one object even if it alone exceeds the time allowance.
+		if ((can_continue && !can_continue()) ||
+			((!completed || i) && time_over(can_continue != nullptr)))
+		{
+			finished = false;
+			break;
+		}
+		if (!predicate(I, m_cycle_count, true))
+			break;
 		update_next();
 		predicate(I, m_cycle_count);
 		I = next();
 	}
+	m_update_in_progress = completed && !finished;
+	if (completed)
+		*completed = finished;
 	m_first_update = iterate_as_first_time_next_time;
 	return (i);
 }
@@ -145,6 +170,7 @@ IC void CSSafeMapIterator::clear()
 {
 	while (!objects().empty())
 		remove(objects().begin()->first);
+	m_update_in_progress = false;
 }
 
 TEMPLATE_SPEZIALIZATION
@@ -158,6 +184,7 @@ IC void CSSafeMapIterator::begin()
 {
 	m_next_iterator = m_objects.begin();
 	m_first_update = true;
+	m_update_in_progress = false;
 }
 
 #undef TEMPLATE_SPEZIALIZATION

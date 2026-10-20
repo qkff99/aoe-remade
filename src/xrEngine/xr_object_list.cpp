@@ -200,7 +200,6 @@ void CObjectList::clear_crow_vec(Objects& o)
 	o.clear_not_free();
 }
 
-extern BOOL mt_Scheduler;
 void CObjectList::Update(bool bForce)
 {
 	PROF_EVENT("CObjectList::Update");
@@ -265,13 +264,10 @@ void CObjectList::Update(bool bForce)
 
 	// Destroy
     ProcessDestroyQueueImpl(force_destroy_queue);
-    if (mt_Scheduler)
     {
         xrCriticalSectionGuard guard(&Device.seqParallelBeforRenderCS);
         Device.seqParallelBeforRender.push_back(xr_make_delegate(this, &CObjectList::ProcessDestroyQueue));
     }
-    else
-        ProcessDestroyQueue();
 }
 
 void CObjectList::ProcessDestroyQueue()

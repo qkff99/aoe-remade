@@ -124,6 +124,8 @@ public:
 
 	virtual void shedule_Update(u32 T);
 	virtual void UpdateCL();
+	void UpdateHudAttachment();
+	u32 m_hud_attachment_frame = u32(-1);
 
 	virtual void OnEvent(NET_Packet& P, u16 type);
 

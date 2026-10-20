@@ -11,6 +11,7 @@
 #include "alife_switch_manager.h"
 #include "alife_surge_manager.h"
 #include "alife_storage_manager.h"
+#include "../xrEngine/pure.h"
 
 namespace RestrictionSpace
 {
@@ -21,10 +22,16 @@ class CALifeUpdateManager :
 	public CALifeSwitchManager,
 	public CALifeSurgeManager,
 	public CALifeStorageManager,
-	public ISheduled
+	public ISheduled,
+	public pureFrame
 {
 private:
 	bool m_first_time;
+	bool m_switch_pending;
+	bool m_scheduled_pending;
+	u32 m_switch_slice_frame;
+	u32 m_scheduled_slice_frame;
+	u32 m_batch_started_frame;
 
 protected:
 	u64 m_max_process_time;
@@ -34,6 +41,7 @@ protected:
 
 public:
 	void __stdcall update();
+	void _BCL OnFrame() override;
 
 protected:
 	void new_game(LPCSTR save_name);
@@ -43,12 +51,13 @@ protected:
 public:
 	CALifeUpdateManager(xrServer* server, LPCSTR section);
 	virtual ~CALifeUpdateManager();
+	void destroy() override;
 	virtual shared_str shedule_Name() const { return shared_str("alife_simulator"); };
 	virtual float shedule_Scale();
 	virtual void shedule_Update(u32 dt);
 	virtual bool shedule_Needed() { return true; };
-	void update_switch();
-	void update_scheduled(bool init_ef = true);
+	bool update_switch(bool frame_limited = false);
+	bool update_scheduled(bool init_ef = true, bool frame_limited = false);
 	void load(LPCSTR game_name = 0, bool no_assert = false, bool new_only = false);
 	bool load_game(LPCSTR game_name, bool no_assert = false);
 	IC float update_monster_factor() const;

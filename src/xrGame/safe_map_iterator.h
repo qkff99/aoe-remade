@@ -30,12 +30,13 @@ protected:
 	CTimer m_timer;
 	float m_max_process_time;
 	bool m_first_update;
+	bool m_update_in_progress;
 
 protected:
 	IC void update_next();
 	IC _iterator& next();
 	IC void start_timer();
-	IC bool time_over();
+	IC bool time_over(bool frame_limited = false);
 
 public:
 	IC CSafeMapIterator();
@@ -43,7 +44,8 @@ public:
 	IC void add(const _key_type& id, _data_type* value, bool no_assert = false);
 	IC void remove(const _key_type& id, bool no_assert = false);
 	template <typename _update_predicate>
-	IC u32 update(const _update_predicate& predicate, bool const iterate_as_first_time_next_time);
+	IC u32 update(const _update_predicate& predicate, bool const iterate_as_first_time_next_time,
+		bool* completed = nullptr, bool (*can_continue)() = nullptr);
 	IC void set_process_time(const float& process_time);
 	IC const _REGISTRY& objects() const;
 	IC void clear();

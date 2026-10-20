@@ -185,10 +185,7 @@ extern float NPCsLookAtActorMinDistance;
 extern BOOL interruptFireOnAimToggle;
 
 extern BOOL mt_UpdateWeaponSounds;
-extern BOOL mt_Scheduler;
-extern BOOL mt_SchedulerRT;
 extern BOOL mt_calc_bones;
-extern BOOL mt_ph_commander;
 extern BOOL mt_TaskManager;
 extern BOOL mt_ui;
 extern int SchedulerBatchSize;
@@ -3301,9 +3298,12 @@ void CCC_RegisterCommands()
 	CMD3(CCC_Mask, "blend_move_anims", &psDeviceFlags2, rsBlendMoveAnims);
 
 	CMD4(CCC_Integer, "mt_update_weapon_sounds", &mt_UpdateWeaponSounds, 0, 1);
-    CMD4(CCC_Integer, "mt_scheduler", &mt_Scheduler, 0, 1);
-    CMD4(CCC_Integer, "mt_schedulerRT", &mt_SchedulerRT, 0, 1);
-	CMD4(CCC_Integer, "mt_level_call", &mt_ph_commander, 0, 1);
+    // Legacy scripts query these names. The execution paths are permanent;
+    // accepting only 1 keeps old configs from restoring synchronous gameplay.
+    static int permanent_mt_path = 1;
+    CMD4(CCC_Integer, "mt_scheduler", &permanent_mt_path, 1, 1);
+    CMD4(CCC_Integer, "mt_schedulerRT", &permanent_mt_path, 1, 1);
+    CMD4(CCC_Integer, "mt_level_call", &permanent_mt_path, 1, 1);
     CMD4(CCC_Integer, "mt_calc_bones", &mt_calc_bones, 0, 1);
     CMD4(CCC_Integer, "mt_task_manager", &mt_TaskManager, 0, 1);
     CMD4(CCC_Integer, "mt_ui", &mt_ui, 0, 1);

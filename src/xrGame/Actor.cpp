@@ -1126,6 +1126,7 @@ float CActor::currentFOV()
 void CActor::UpdateCL()
 {
 	PROF_EVENT("CActor UpdateCL");
+	UpdateHudAttachment();
 	if (g_Alive() && Level().CurrentViewEntity() == this)
 	{
 		if (CurrentGameUI() && (!CurrentGameUI()->TopInputReceiver() || (CurrentGameUI()->TopInputReceiver() && !CurrentGameUI()->TopInputReceiver()->StopAnyMove())) && !m_holder)
@@ -1769,11 +1770,13 @@ void CActor::set_state_box(u32 mstate)
 		character_physics_support()->movement()->ActivateBox(0, true);
 }
 
-void CActor::shedule_Update(u32 DT)
+void CActor::UpdateHudAttachment()
 {
-	PROF_EVENT("CActor shedule_Update");
-	setSVU(OnServer());
-	//.	UpdateInventoryOwner			(DT);
+	// RT scheduling may overlap HUD rendering. Keep attachment changes on the
+	// client owner, once per frame, while leaving the script update on its worker.
+	if (!Device.IsMainThread() || m_hud_attachment_frame == Device.dwFrame)
+		return;
+	m_hud_attachment_frame = Device.dwFrame;
 
 	if (IsFocused())
 	{
@@ -1803,6 +1806,15 @@ void CActor::shedule_Update(u32 DT)
 			}
 		}
 	}
+}
+
+void CActor::shedule_Update(u32 DT)
+{
+	PROF_EVENT("CActor shedule_Update");
+	setSVU(OnServer());
+	//.	UpdateInventoryOwner			(DT);
+
+	UpdateHudAttachment();
 
 	if (m_holder || !getEnabled() || !Ready())
 	{

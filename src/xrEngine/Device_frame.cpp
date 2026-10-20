@@ -116,6 +116,11 @@ bool CRenderDevice::IsGameLogicThread() const
     return game_logic_depth != 0;
 }
 
+bool CRenderDevice::CanContinueGameLogicWork() const
+{
+    return isRendering.load(std::memory_order_acquire) && lua_gc_window.IsOpen();
+}
+
 bool CRenderDevice::LuaGCAutomaticAllowed() const
 {
     if (!IsGameLogicThread() && (!IsMainThread() || game_logic_pending.load(std::memory_order_acquire)))
@@ -180,11 +185,9 @@ void CRenderDevice::RunGameLogicWork(void* context)
 
 void CRenderDevice::StartGameLogic()
 {
-    if (!lua_gc_always_frame)
-    {
-        secondary_tasks.run(&XRay::Engine::GameThread);
-        return;
-    }
+    // Keep one Lua/game owner independently of the collector toggle. RT and
+    // Commander callbacks still need the main-entry and lifetime fences when
+    // lua_gc_always is disabled (the same owner arrangement as AOE).
     R_ASSERT2(game_logic_worker.Initialize(&CRenderDevice::RunGameLogicWork, this, native_gc_pool),
         "Cannot create native Lua/game-logic worker");
     game_logic_gc_only = false;

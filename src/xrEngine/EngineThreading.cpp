@@ -10,8 +10,6 @@
 #include "Irenderable.h"
 #include "../../Include/xrRender/Kinematics.h"
 
-BOOL mt_Scheduler = TRUE;
-BOOL mt_SchedulerRT = FALSE;
 
 void XRay::Engine::PreRenderThread()
 {
@@ -140,19 +138,8 @@ void XRay::Engine::GameThread()
 
 	if (!Device.Paused())
 	{
-		if (mt_Scheduler)
-		{
-			PROF_EVENT("Sheduler Deferred");
-            if (mt_SchedulerRT)
-            {
-                ::Engine.Sheduler.Update();
-            }
-            else
-            {
-                ::Engine.Sheduler.UpdateDeferred();
-                ::Engine.Sheduler.UpdateFinalize();
-            }
-		}
+		PROF_EVENT("Sheduler Deferred");
+		::Engine.Sheduler.Update();
 	}
 
 	{
@@ -180,11 +167,15 @@ void XRay::Engine::GameThread()
 
         } while (Device.isRendering && Device.LuaGCCount < psLua_ParallelGC_CallAmount);
     };
-    if (!Device.LuaGCAlwaysActive() && psLua_ParallelGC && Device.LuaGC)
-        Device.secondary_tasks.run(LuaGC);
 
 	{
 		PROF_EVENT("seqFrameMT");
 		Device.seqFrameMT.Process(rp_Frame);
 	}
+    if (!Device.LuaGCAlwaysActive() && psLua_ParallelGC && Device.LuaGC)
+    {
+        Device.secondary_tasks.wait();
+        LuaGC();
+    }
+
 }

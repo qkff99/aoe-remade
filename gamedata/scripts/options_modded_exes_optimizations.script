@@ -17,7 +17,6 @@ PAGE = filter_false(page {
 	get_item_if_exists(check { id = "r2_mt", def = true }),
 	get_item_if_exists(check { id = "mt_bullets", def = true }),
 	get_item_if_exists(check { id = "mt_particles", def = true }),
-	get_item_if_exists(list_bool { id = "mt_scheduler" }),
 	get_item_if_exists(track {
 		id = "scheduler_batch_size",
 		def = 256,
@@ -83,8 +82,6 @@ PAGE = filter_false(page {
 		align= "l",
 		clr= {255,255,255,255}
 	},
-	get_item_if_exists(list_bool { id = "mt_schedulerRT" }),
-	get_item_if_exists(list_bool { id = "mt_level_call" }),
 	get_item_if_exists(list_bool { id = "mt_task_manager"}),
 	get_item_if_exists(list_bool { id = "mt_ui"}),
 	get_item_if_exists(check { id = "r__hom_dynamic" }),

@@ -30,6 +30,21 @@ using namespace ALife;
 
 extern string_path g_last_saved_game;
 
+namespace
+{
+	bool CanContinueALife()
+	{
+		return Device.CanContinueGameLogicWork();
+	}
+
+	bool UseALifeFrameSlices()
+	{
+		// Loading and explicit force_update calls retain their synchronous path.
+		return g_mt_config.test(mtALife) && Device.IsGameLogicThread() &&
+			!Device.dwPrecacheFrame && g_pGameLevel && g_pGameLevel->bReady;
+	}
+}
+
 class CSwitchPredicate
 {
 private:
@@ -71,10 +86,14 @@ CALifeUpdateManager::CALifeUpdateManager(xrServer* server, LPCSTR section) :
 	m_objects_per_update = pSettings->r_u32(section, "objects_per_update");
 	m_changing_level = false;
 	m_first_time = true;
+	m_switch_pending = m_scheduled_pending = false;
+	m_switch_slice_frame = m_scheduled_slice_frame = m_batch_started_frame = u32(-1);
+	Device.seqFrameMT.Add(this, REG_PRIORITY_HIGH);
 }
 
 CALifeUpdateManager::~CALifeUpdateManager()
 {
+	Device.seqFrameMT.Remove(this);
 	shedule_unregister();
 	Device.remove_from_seq_parallel(
 		xr_make_delegate(
@@ -84,37 +103,80 @@ CALifeUpdateManager::~CALifeUpdateManager()
 	);
 }
 
+void CALifeUpdateManager::destroy()
+{
+	m_switch_pending = m_scheduled_pending = false;
+	m_batch_started_frame = u32(-1);
+	CALifeSimulatorBase::destroy();
+}
+
 float CALifeUpdateManager::shedule_Scale()
 {
 	return (.5f); // (schedule_min + schedule_max)*0.5f
 }
 
-void CALifeUpdateManager::update_switch()
+bool CALifeUpdateManager::update_switch(bool frame_limited)
 {
+	if (frame_limited && m_switch_slice_frame == Device.dwFrame)
+		return !m_switch_pending;
 	init_ef_storage();
 
 	START_PROFILE("ALife/switch")
 		;
-		graph().level().update(CSwitchPredicate(this), Device.dwPrecacheFrame > 0);
+		m_switch_pending = !graph().level().update(CSwitchPredicate(this), Device.dwPrecacheFrame > 0,
+			frame_limited ? &CanContinueALife : nullptr);
 	STOP_PROFILE
+	m_switch_slice_frame = Device.dwFrame;
+	return !m_switch_pending;
 }
 
-void CALifeUpdateManager::update_scheduled(bool init_ef)
+void CALifeUpdateManager::OnFrame()
 {
+	if (!initialized() || m_changing_level || Device.Paused() || !UseALifeFrameSlices())
+		return;
+	const bool continue_switch = m_switch_pending && m_switch_slice_frame != Device.dwFrame;
+	const bool continue_scheduled = m_scheduled_pending && m_scheduled_slice_frame != Device.dwFrame;
+	if (!continue_switch && !continue_scheduled)
+		return;
+
+	PROF_EVENT("ALife/continuation");
+	if (continue_switch)
+		update_switch(true);
+	if (continue_scheduled)
+		update_scheduled(!continue_switch, true);
+	if (m_batch_started_frame != u32(-1))
+	{
+		PROF_TAG("ALife batch age frames", Device.dwFrame - m_batch_started_frame);
+	}
+	if (!m_switch_pending && !m_scheduled_pending)
+		m_batch_started_frame = u32(-1);
+}
+
+bool CALifeUpdateManager::update_scheduled(bool init_ef, bool frame_limited)
+{
+	if (frame_limited && m_scheduled_slice_frame == Device.dwFrame)
+		return !m_scheduled_pending;
 	if (init_ef)
 		init_ef_storage();
 
 	START_PROFILE("ALife/scheduled")
 		;
-		scheduled().update();
+		m_scheduled_pending = !scheduled().update(frame_limited);
 	STOP_PROFILE
+	m_scheduled_slice_frame = Device.dwFrame;
+	return !m_scheduled_pending;
 }
 
 void CALifeUpdateManager::update()
 {
-	PROF_EVENT("AI: A-Life Update");
-	update_switch();
-	update_scheduled(false);
+    PROF_EVENT("AI: A-Life Update");
+    const bool frame_limited = UseALifeFrameSlices();
+    if (!m_switch_pending && !m_scheduled_pending)
+        m_batch_started_frame = Device.dwFrame;
+    update_switch(frame_limited);
+    update_scheduled(false, frame_limited);
+    if (!m_switch_pending && !m_scheduled_pending)
+        m_batch_started_frame = u32(-1);
 }
 
 void CALifeUpdateManager::shedule_Update(u32 dt)
@@ -126,6 +188,8 @@ void CALifeUpdateManager::shedule_Update(u32 dt)
 
 	if (!m_first_time && g_mt_config.test(mtALife))
 	{
+		// Each phase resumes its own cursor/quota. A pending switch pass must
+		// not prevent a newly due scheduled batch (or vice versa).
 		Device.seqParallel.push_back(
 			xr_make_delegate(
 				this,
@@ -144,7 +208,18 @@ void CALifeUpdateManager::shedule_Update(u32 dt)
 
 void CALifeUpdateManager::set_process_time(int microseconds)
 {
-	graph().set_process_time(float(microseconds) - float(microseconds) * update_monster_factor() / 1000000.f);
+	// process_time is configured in microseconds, while CSSafeMapIterator compares
+	// against a timer measured in seconds. The old expression divided only the
+	// monster share by 1,000,000, leaving almost the entire microsecond value as
+	// seconds (900 became ~899.9999 s). That effectively disabled the switch-work
+	// time slice and periodically let one A-Life task monopolise the game worker.
+	const float monster_factor = std::max(0.f, std::min(update_monster_factor(), 1.f));
+	const float switch_process_time =
+		float(std::max(microseconds, 0)) * (1.f - monster_factor) / 1000000.f;
+	graph().set_process_time(switch_process_time);
+	scheduled().set_process_time(float(std::max(microseconds, 0)) * monster_factor / 1000000.f);
+	Msg("* [A-Life/v84] switch budget %.3f ms (process_time=%d us, monster-factor=%.3f)",
+		switch_process_time * 1000.f, microseconds, monster_factor);
 }
 
 void CALifeUpdateManager::objects_per_update(const u32& objects_per_update)
@@ -311,6 +386,8 @@ void CALifeUpdateManager::load(LPCSTR game_name, bool no_assert, bool new_only)
 
 void CALifeUpdateManager::reload(LPCSTR section)
 {
+	m_switch_pending = m_scheduled_pending = false;
+	m_switch_slice_frame = m_scheduled_slice_frame = m_batch_started_frame = u32(-1);
 	CALifeSimulatorBase::reload(section);
 	set_process_time((int)m_max_process_time);
 	objects_per_update(m_objects_per_update);

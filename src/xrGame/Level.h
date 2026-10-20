@@ -308,6 +308,7 @@ public:
 	IC CClientSpawnManager& client_spawn_manager();
 	IC CAutosaveManager& autosave_manager();
     IC CDebugRenderer& debug_renderer();
+	void __stdcall update_script_calls();
 	void __stdcall script_gc(); // GC-cycle
     static int LuaGC(); // GC that will called from Device via Device.LuaGC
     static void LuaGCPrepare(bool always);

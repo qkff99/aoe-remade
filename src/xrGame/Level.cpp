@@ -293,6 +293,7 @@ extern CAI_Space* g_ai_space;
 CLevel::~CLevel()
 {
     Device.ResetLuaGCState();
+    Device.remove_from_seq_parallel(xr_make_delegate(this, &CLevel::update_script_calls));
     Device.LuaGC.clear();
     Device.LuaGCDebug.clear();
     Device.LuaGCPrepare.clear();
@@ -985,7 +986,6 @@ void CLevel::MakeReconnect()
 	}
 }
 
-BOOL mt_ph_commander = FALSE;
 BOOL mt_TaskManager = FALSE;
 void CLevel::OnFrame()
 {
@@ -1151,14 +1151,10 @@ void CLevel::OnFrame()
 #endif
 	g_pGamePersistent->Environment().SetGameTime(GetEnvironmentGameDayTimeSec(),
 	                                             game->GetEnvironmentGameTimeFactor());
-	if (!mt_ph_commander)
-	{
-		PROF_EVENT("m_ph_commander");
-		ai().script_engine().script_process(ScriptEngine::eScriptProcessorLevel)->update();
-
-		m_ph_commander->update();
-		m_ph_commander_scripts->update();
-	}
+	if (bReady && !Device.dwPrecacheFrame)
+		Device.seqParallel.push_back(xr_make_delegate(this, &CLevel::update_script_calls));
+	else
+		update_script_calls();
 
 	// update static sounds
 	if (!g_dedicated_server)
@@ -1197,16 +1193,17 @@ int psLua_ParallelGCStep = 75;
 extern BOOL psLua_ParallelGC;
 extern BOOL psLua_ParallelGC_debug;
 
+void CLevel::update_script_calls()
+{
+    PROF_EVENT("m_ph_commander");
+    ai().script_engine().script_process(ScriptEngine::eScriptProcessorLevel)->update();
+    m_ph_commander->update();
+    m_ph_commander_scripts->update();
+}
+
 void CLevel::script_gc()
 {
-	if (mt_ph_commander)
-	{
-		PROF_EVENT("m_ph_commander");
-		ai().script_engine().script_process(ScriptEngine::eScriptProcessorLevel)->update();
 
-		m_ph_commander->update();
-		m_ph_commander_scripts->update();
-	}
 	if (!Device.LuaGCAlwaysActive() && !(psLua_ParallelGC && Device.LuaGC))
 	{
 		PROF_EVENT("CLevel::script_gc");
