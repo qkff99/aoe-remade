@@ -632,7 +632,7 @@ struct ETWRuntime
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 class ETW : public Trace
 {
-	static const int ETW_BUFFER_SIZE = 1024; // 1 MiB; EVENT_TRACE_PROPERTIES uses KiB.
+	static const int ETW_BUFFER_SIZE = 1024 << 10; // 1Mb
 	static const int ETW_BUFFER_COUNT = 32;
 	static const int ETW_MAXIMUM_SESSION_NAME = 1024;
 
