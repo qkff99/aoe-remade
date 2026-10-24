@@ -39,6 +39,9 @@ SVS::~SVS()
 //	SPS
 SPS::~SPS()
 {
+#if defined(USE_DX11) && RENDER == R_R4
+    aoe_temporal::Forget(ps);
+#endif
 	_RELEASE(ps);
 	DEV->_DeletePS(this);
 }

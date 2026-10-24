@@ -122,6 +122,36 @@ ref_rt& CRenderTarget::PostprocessSource()
 	return dlss::Configured() ? rt_dlss_post_source : rt_Generic_0;
 }
 
+void CRenderTarget::PrepareBlurMotion()
+{
+    if (!dlss::Configured()) return;
+    PROF_EVENT("Render.Upscaler.MotionBlurInput");
+    aoe_temporal::Restore(RCache);
+    u_setrt(rt_aoe_blur_vectors, nullptr, nullptr, nullptr);
+    RCache.set_Element(s_aoe_blur_vectors->E[2]);
+    const auto current = dlss::RasterJitter(), previous = dlss::PreviousRasterJitter();
+    RCache.set_c("aoe_blur_jitter", dlss::TemporalScene() ? (current.x - previous.x) / dlss::RenderWidth() : 0,
+        dlss::TemporalScene() ? (current.y - previous.y) / dlss::RenderHeight() : 0, 0, 0);
+    RCache.set_CullMode(CULL_NONE);
+    RCache.set_Stencil(FALSE);
+    RCache.set_ColorWriteEnable();
+    DrawNativeScreenQuad(s_aoe_blur_vectors->E[2], float(dlss::RenderWidth()), float(dlss::RenderHeight()));
+}
+
+void CRenderTarget::PrepareFsrColor(ref_rt& destination)
+{
+    if (!dlss::UsesFsr()) return;
+    PROF_EVENT("Render.Upscaler.LinearColor");
+    aoe_temporal::Restore(RCache);
+    u_setrt(destination, nullptr, nullptr, nullptr);
+    RCache.set_Element(s_dlss_copy->E[3]);
+    RCache.set_c("aoe_gamma", ps_r2_img_gamma, 0, 0, 0);
+    RCache.set_CullMode(CULL_NONE);
+    RCache.set_Stencil(FALSE);
+    RCache.set_ColorWriteEnable();
+    DrawNativeScreenQuad(s_dlss_copy->E[3], float(dlss::RenderWidth()), float(dlss::RenderHeight()));
+}
+
 void CRenderTarget::phase_dlss_postprocess()
 {
     if (!dlss::Configured())
@@ -131,7 +161,40 @@ void CRenderTarget::phase_dlss_postprocess()
     }
     PROF_EVENT("Render.Upscaler.ResolveAndOverlays");
 	const auto sceneJitter = dlss::RasterJitter();
-	const bool dlssOutput = dlss::Evaluate(rt_Color->pSurface, rt_ssfx_motion_vectors->pSurface);
+    ID3D11Texture2D* color = rt_Color->pSurface;
+    if (dlss::Active() && dlss::LinearColor())
+    {
+        PrepareFsrColor(rt_aoe_linear_color);
+        color = rt_aoe_linear_color->pSurface;
+    }
+    if (dlss::Active())
+    {
+        aoe_temporal::ProfileFrame();
+        PROF_EVENT("Render.Upscaler.ResolveMotion");
+        aoe_temporal::Restore(RCache);
+        u_setrt(rt_aoe_motion_resolved, rt_aoe_reactive, nullptr, nullptr);
+        RCache.set_Element(s_aoe_motion_resolve->E[0]);
+        Fmatrix reprojection, skyReprojection;
+        aoe_temporal::Reprojection(reprojection, false, true);
+        aoe_temporal::Reprojection(skyReprojection, true, true);
+        RCache.set_c("aoe_reproject", reprojection);
+        RCache.set_c("aoe_reproject_sky", skyReprojection);
+        const auto previousJitter = dlss::PreviousRasterJitter();
+        RCache.set_c("aoe_resolve_jitter", (sceneJitter.x - previousJitter.x) / dlss::RenderWidth(),
+            (sceneJitter.y - previousJitter.y) / dlss::RenderHeight(), 0, 0);
+        RCache.set_CullMode(CULL_NONE);
+        RCache.set_Stencil(FALSE);
+        RCache.set_ColorWriteEnable();
+        DrawNativeScreenQuad(s_aoe_motion_resolve->E[0], float(dlss::RenderWidth()), float(dlss::RenderHeight()));
+        // r_upscaler_motion 0 is a diagnostic: reconstruct with zero motion vectors and no reactive mask.
+        if (!ps_r_upscaler_motion)
+        {
+            const float zero[4]{};
+            HW.pContext->ClearRenderTargetView(rt_aoe_motion_resolved->pRT, zero);
+            HW.pContext->ClearRenderTargetView(rt_aoe_reactive->pRT, zero);
+        }
+    }
+	const bool dlssOutput = dlss::Evaluate(color, rt_aoe_motion_resolved->pSurface, rt_aoe_reactive->pSurface);
 	dlss::EndScene();
 	if (!dlss::Configured()) return;
 
@@ -152,11 +215,26 @@ void CRenderTarget::phase_dlss_postprocess()
 	RCache.Vertex.Unlock(4, g_combine->vb_stride);
 	// Fuse optional CAS into the existing resolve draw: no extra target or copy.
 	// Zero retains the original copy shader; fallback/scope frames are unsharpened.
-	const bool sharpen = dlssOutput && ps_r_dlss_sharpness > 0.0f;
+	const bool sharpen = dlssOutput && !dlss::UsesFsr() && ps_r_dlss_sharpness > 0.0f;
 	RCache.set_Element(s_dlss_copy->E[dlssOutput ? (sharpen ? 2 : 0) : 1]);
-	if (sharpen) RCache.set_c("dlss_sharpening", ps_r_dlss_sharpness, 0.f, 0.f, 0.f);
+	if (sharpen) RCache.set_c("aoe_sharpening", ps_r_dlss_sharpness, 0.f, 0.f, 0.f);
+    RCache.set_c("aoe_encode", dlssOutput && dlss::LinearColor() ? 1.0f / ps_r2_img_gamma : 1.0f, 0, 0, 0);
 	RCache.set_Geometry(g_combine);
 	RCache.Render(D3DPT_TRIANGLELIST, offset, 0, 4, 0, 2);
+
+    // Existing NVG/heat/scope shaders see native-sized inputs, including shaders
+    // that use integer depth loads rather than normalized texture coordinates.
+    u_setrt(rt_aoe_post_position, rt_aoe_post_heat, nullptr, HW.pBaseZB);
+    RCache.set_Element(s_aoe_post_inputs->E[1]);
+    RCache.set_c("aoe_post_scale", float(dlss::RenderWidth()) / w, float(dlss::RenderHeight()) / h,
+        sceneJitter.x, sceneJitter.y);
+    RCache.set_ZFunc(D3DCMP_ALWAYS);
+    RCache.set_ColorWriteEnable();
+    RCache.Render(D3DPT_TRIANGLELIST, offset, 0, 4, 0, 2);
+    aoe_temporal::DisplayInputs(rt_Position->pTexture._get(), rt_aoe_post_position->pTexture->get_SRView(),
+        rt_Heat->pTexture._get(), rt_aoe_post_heat->pTexture->get_SRView());
+    RCache.InvalidateAfterCommandList();
+    u_setrt(rt_dlss_post_source, nullptr, nullptr, HW.pBaseZB);
 
 	// Only defer direct UI draws when wearable surfaces were found in this view.
 	// A normal weapon/device must not trigger an additional native depth pass.
@@ -172,17 +250,7 @@ void CRenderTarget::phase_dlss_postprocess()
 				unsigned(RImplementation.GMBase.RGraph.mapHUDNativeUi.size()), unsigned(renderHudUi));
 			reported_native_ui = true;
 		}
-		// Scene depth is render-sized and jittered. Reproject it into the existing
-		// native depth buffer before drawing unjittered HUD screens. Keep their
-		// occlusion by hands/casing; never attach a render-sized DSV to a native RT.
-		u_setrt(rt_dlss_post_source, nullptr, nullptr, HW.pBaseZB);
-		RCache.set_Element(s_dlss_ui_depth->E[0]);
-		RCache.set_c("dlss_ui_depth_params", float(dlss::RenderWidth()) / w,
-			float(dlss::RenderHeight()) / h, sceneJitter.x, sceneJitter.y);
-		RCache.set_ZFunc(D3DCMP_ALWAYS);
-		RCache.set_ColorWriteEnable(0);
-		RCache.Render(D3DPT_TRIANGLELIST, offset, 0, 4, 0, 2);
-		RCache.set_ColorWriteEnable();
+		// Display depth was prepared together with the other postprocess inputs.
 		RCache.set_CullMode(CULL_CCW);
 		RImplementation.GMBase.r_dsgraph_render_native_ui(renderHudUi);
 	}

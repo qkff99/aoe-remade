@@ -1,0 +1,10 @@
+// Motion blur consumes physical object/camera movement, without raster sampling jitter.
+Texture2D<float4> aoe_legacy_motion;
+float4 aoe_blur_jitter;
+
+float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
+{
+    float4 motion = aoe_legacy_motion.Load(int3(int2(position.xy), 0));
+    motion.xy -= aoe_blur_jitter.xy;
+    return motion;
+}

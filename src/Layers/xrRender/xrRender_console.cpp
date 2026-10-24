@@ -7,6 +7,7 @@
 #include "../../build_config_defines.h"
 #if defined(USE_DX11) && RENDER == R_R4
 #include "../xrRenderPC_R4/LocalLightDebug.h"
+#include "../xrRenderPC_R4/Dlss/TemporalShaders.h"
 #endif
 
 u32 ps_Preset = 2;
@@ -22,6 +23,9 @@ xr_token fsr3_quality_token[] = {
 };
 u32 ps_r_dlss_preset = 0;
 float ps_r_dlss_sharpness = 0.0f;
+int ps_r_upscaler_jitter = 1;
+int ps_r_upscaler_motion = 1;
+int ps_r_upscaler_alpha_motion = 1;
 xr_token dlss_preset_token[] = {
     {"default", 0}, {"j", 10}, {"k", 11}, {"l", 12}, {"m", 13}, {nullptr, 0}
 };
@@ -1105,6 +1109,13 @@ public:
     CCC_LightDebugDump(LPCSTR name) : IConsole_Command(name) { bEmptyArgsHandled = TRUE; }
     void Execute(LPCSTR) override { LocalLightDebug::RequestDump(); }
 };
+
+class CCC_UpscalerMotionDump : public IConsole_Command
+{
+public:
+    CCC_UpscalerMotionDump(LPCSTR name) : IConsole_Command(name) { bEmptyArgsHandled = TRUE; }
+    void Execute(LPCSTR) override { aoe_temporal::RequestDump(); }
+};
 #endif
 
 //	Allow real-time fog config reload
@@ -1606,9 +1617,13 @@ void xrRender_initconsole()
 	CMD3(CCC_Token, "r_fsr3_quality", &ps_r_fsr3_quality, fsr3_quality_token);
 	CMD3(CCC_Token, "r_dlss_preset", &ps_r_dlss_preset, dlss_preset_token);
 	CMD4(CCC_Float, "r_dlss_sharpness", &ps_r_dlss_sharpness, 0.0f, 1.0f);
+	CMD4(CCC_Integer, "r_upscaler_jitter", &ps_r_upscaler_jitter, 0, 1);
+	CMD4(CCC_Integer, "r_upscaler_motion", &ps_r_upscaler_motion, 0, 1);
+	CMD4(CCC_Integer, "r_upscaler_alpha_motion", &ps_r_upscaler_alpha_motion, 0, 1);
 #if RENDER == R_R4
     CMD4(CCC_Integer, "r4_light_debug", &LocalLightDebug::show, 0, 1);
     CMD1(CCC_LightDebugDump, "r4_light_debug_dump");
+    CMD1(CCC_UpscalerMotionDump, "r4_upscaler_motion_dump");
 #endif
 #endif
 	CMD3(CCC_Mask,		"r2_gi",				&ps_r2_ls_flags,			R2FLAG_GI);

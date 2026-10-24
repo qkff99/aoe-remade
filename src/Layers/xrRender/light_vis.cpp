@@ -4,6 +4,7 @@
 #include "../../xrEngine/cl_intersect.h"
 #if defined(USE_DX11) && RENDER == R_R4
 #include "../xrRenderPC_R4/LocalLightDebug.h"
+#include "../xrRenderPC_R4/Dlss/DlssIntegration.h"
 #endif
 
 const u32 delay_small_min = 1;
@@ -11,14 +12,29 @@ const u32 delay_small_max = 3;
 const u32 delay_large_min = 10;
 const u32 delay_large_max = 20;
 const u32 cullfragments = 4;
+#if defined(USE_DX11) && RENDER == R_R4
+const u32 hidden_confirmations = 16;
+#endif
 
 #if defined(USE_DX11) && RENDER == R_R4
+// A still player's camera position still flips between neighbouring floats (~1.5e-5 m at
+// 250 m from the origin); a bitwise compare then revokes valid hidden answers on alternate frames.
+static bool view_unchanged(const Fmatrix& a, const Fmatrix& b)
+{
+    const float* x = &a._11;
+    const float* y = &b._11;
+    for (u32 i = 0; i < 16; ++i)
+        if (_abs(x[i] - y[i]) > (i >= 12 && i < 15 ? 1e-3f : 1e-4f))
+            return false;
+    return true;
+}
+
 bool light::vis_query_current() const
 {
     // A zero sample count only establishes occlusion for the query's camera
     // and light volume. Jitter and weather far-plane drift do not change its rays.
     return vis.query_view_valid &&
-        !memcmp(&vis.query_view, &Device.mView, sizeof(Fmatrix)) &&
+        view_unchanged(vis.query_view, Device.mView) &&
         !memcmp(&vis.query_world, &m_xform, sizeof(Fmatrix)) &&
         _abs(vis.query_parameters.x - Device.mProject._11) < .001f &&
         _abs(vis.query_parameters.y - Device.mProject._22) < .001f &&
@@ -125,6 +141,16 @@ void light::vis_prepare()
     vis.query_view_valid = true;
 #endif
     RCache.set_xform_world(m_xform);
+#if defined(USE_DX11) && RENDER == R_R4
+    if (dlss::TemporalScene())
+    {
+        // Test the light volume on the same raster sample as the scene depth.
+        // The native query shader does not use the material jitter wrapper.
+        Fmatrix query_projection = RCache.xforms.m_wvp;
+        aoe_temporal::Projection(query_projection, false);
+        RCache.set_c("m_WVP", query_projection);
+    }
+#endif
     CHK_DX(BeginQuery(vis.Q));
     //	Hack: Igor. Light is visible if it's frutum is visible. (Only for volumetric)
     //	Hope it won't slow down too much since there's not too much volumetric lights
@@ -183,12 +209,21 @@ void light::vis_update()
     vis.visible = (fragments > cullfragments);
     vis.frame2test = vis.visible ? (frame + ::Random.randI(delay_large_min, delay_large_max)) : (frame + 1);
 #if defined(USE_DX11) && RENDER == R_R4
+    // Jittered depth makes a barely visible volume read above and below the threshold on
+    // alternate frames, while a visible light is retested only every 10-20 frames. Hide it
+    // after consecutive hidden answers, or the light blinks at that retest rate.
+    if (dlss::TemporalScene())
+    {
+        if (vis.visible) vis.hidden_streak = 0;
+        else if (++vis.hidden_streak < hidden_confirmations) vis.visible = true;
+    }
     if (!current_view)
     {
         // The GPU may be several frames behind. A late zero from another view
         // must not hide a face that the camera has already revealed.
         vis.visible = true;
         vis.frame2test = frame + 1;
+        vis.hidden_streak = 0;
     }
     if (LocalLightDebug::active) LocalLightDebug::QueryResult(*this, hr, fragments);
     if (!current_view && LocalLightDebug::active) LocalLightDebug::Visibility(*this, LocalLightDebug::Reason::ViewChanged);

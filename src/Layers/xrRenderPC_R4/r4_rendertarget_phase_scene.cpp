@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "Dlss/TemporalShaders.h"
 
 // startup
 void CRenderTarget::phase_scene_prepare()
@@ -35,6 +36,7 @@ void CRenderTarget::phase_scene_prepare()
 // begin
 void CRenderTarget::phase_scene_begin()
 {
+	aoe_temporal::SetSceneGeometry(true);
 	SSManager.SetMaxAnisotropy(ps_r__tf_Anisotropic);	
 	
 	ID3DDepthStencilView* pZB = dlss::SceneDepth();
@@ -70,6 +72,7 @@ void CRenderTarget::disable_aniso()
 // end
 void CRenderTarget::phase_scene_end()
 {
+	aoe_temporal::SetSceneGeometry(false);
 	disable_aniso();
 
 	RCache.set_RT(NULL, 3); // Always reset the 4th RT ( Motion Vectors )

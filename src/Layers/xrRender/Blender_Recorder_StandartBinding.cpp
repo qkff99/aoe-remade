@@ -1447,8 +1447,9 @@ static Fvector4 CalculateRenderJitter()
     }
     if (dlss::Configured())
     {
-        const auto jitter = dlss::ClipJitter(dlss::RasterJitter(), {dlss::RenderWidth(), dlss::RenderHeight()});
-        return Fvector4().set(jitter.x, jitter.y, 0.f, 0.f);
+        // Owned vertex variants apply raster jitter after material evaluation.
+        // Existing material shaders must not apply a second SSS-specific offset.
+        return Fvector4().set(0.f, 0.f, 0.f, 0.f);
     }
 #endif
     return Fvector4().set(jitter_x * ps_ssfx_taa.y, jitter_y * ps_ssfx_taa.y, ps_ssfx_taa.x, ps_ssfx_taa.w);
@@ -1465,7 +1466,9 @@ static class ssfx_jitter : public NativeConstantSetup
 #if defined(USE_DX11)
 Fvector4 CalculateUpscalerParameters()
 {
-    return Fvector4().set(dlss::Active() ? 1.0f : 0.0f, float(dlss::RenderWidth()), float(dlss::RenderHeight()), 0.0f);
+    // Keep compatibility-patch offsets disabled: the owned legacy MV writer
+    // already includes the frame-to-frame raster displacement.
+    return Fvector4().set(0.f, float(dlss::RenderWidth()), float(dlss::RenderHeight()), 0.0f);
 }
 
 static class dlss_params : public NativeConstantSetup

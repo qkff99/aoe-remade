@@ -178,6 +178,7 @@ void CDetailManager::hw_Render_dump(const Fvector4& consts, const Fvector4& wave
 {
     PROF_EVENT("Render.Grass.ConstantBlocks");
 #if RENDER == R_R4
+    aoe_temporal::SetIdentity(this, nullptr);
     const bool valid_delta = _valid(Device.fTimeDelta) && Device.fTimeDelta >= 0.f;
     const bool use_cache = hw_BatchSize && valid_delta && RCache.RenderPhase(RImplementation.phase) == CRender::PHASE_NORMAL &&
         !Device.m_SecondViewport.IsSVPFrame() && _valid(fade_distance) && fade_distance >= 0.f &&
@@ -186,6 +187,9 @@ void CDetailManager::hw_Render_dump(const Fvector4& consts, const Fvector4& wave
 #endif
 	if (RCache.RenderPhase(RImplementation.phase) == CRender::PHASE_SMAP && var_id == 0)
 		return;
+#if RENDER == R_R4
+    aoe_temporal::AnimationHistory(true, prev_wave, prev_wind);
+#endif
 
 	static shared_str strConsts("consts");
 	static shared_str strWave("wave");

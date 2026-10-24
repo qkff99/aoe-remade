@@ -128,6 +128,7 @@ void CRender::level_Load(IReader* fs)
 
 void CRender::level_Unload()
 {
+    aoe_temporal::ResetHistory();
     dxRenderDeviceRender::Instance().Resources->WaitForTextureLoads();
     PROF_EVENT("LoadGame.RenderUnload");
     if (local_light_shadows) local_light_shadows->Clear();

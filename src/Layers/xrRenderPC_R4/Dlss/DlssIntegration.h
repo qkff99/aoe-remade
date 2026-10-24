@@ -12,6 +12,9 @@ void ShutdownDevice();
 void BeginScene();
 void EndScene(bool invalidateHistory = false);
 bool Active();
+bool TemporalScene();
+bool UsesFsr();
+bool LinearColor();
 bool Configured();
 unsigned RenderWidth();
 unsigned RenderHeight();
@@ -20,5 +23,6 @@ Offset PreviousRasterJitter();
 ID3DDepthStencilView* SceneDepth();
 ID3D11Texture2D* SceneDepthTexture();
 ID3D11Texture2D* Output();
-bool Evaluate(ID3D11Texture2D* color, ID3D11Texture2D* motion);
+void TraceEvaluations(unsigned count);
+bool Evaluate(ID3D11Texture2D* color, ID3D11Texture2D* motion, ID3D11Texture2D* reactive);
 }

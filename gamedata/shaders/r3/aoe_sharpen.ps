@@ -1,0 +1,10 @@
+Texture2D<float4> aoe_image;
+SamplerState aoe_sampler;
+cbuffer AOE_Encode : register(b0) { float4 aoe_encode; };
+cbuffer AOE_Sharpening : register(b1) { float4 aoe_sharpening; };
+#include "aoe_cas.h"
+
+float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
+{
+    return AoeCas(uv);
+}

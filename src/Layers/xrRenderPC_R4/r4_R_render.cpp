@@ -374,7 +374,10 @@ void CRender::Render()
 		//RCache.set_Stencil				(TRUE,D3DCMP_ALWAYS,0x00,0xff,0xff,D3DSTENCILOP_KEEP,D3DSTENCILOP_REPLACE,D3DSTENCILOP_KEEP);
 		RCache.set_CullMode(CULL_CCW);
 		RCache.set_ColorWriteEnable();
+		// Emissive overlays are depth-tested against the jittered scene depth: they need the same raster offset.
+		aoe_temporal::SetSceneGeometry(true);
 		GMBase.r_dsgraph_render_emissive(RImplementation.o.ssfx_bloom ? false : true);
+		aoe_temporal::SetSceneGeometry(false);
 	}
 
 	if (RImplementation.o.ssfx_bloom)
@@ -387,7 +390,9 @@ void CRender::Render()
 		// Keep regular HUD geometry out of the emissive target. It is already
 		// present in the scene texture sampled by the bloom build pass; drawing it
 		// here again treats every strict-sorted HUD surface as an emissive source.
+		aoe_temporal::SetSceneGeometry(true);
 		GMBase.r_dsgraph_render_emissive(true, false);
+		aoe_temporal::SetSceneGeometry(false);
 	}
 
 	// Lighting, non dependant on OCCQ

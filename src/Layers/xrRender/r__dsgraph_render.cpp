@@ -111,6 +111,9 @@ static void render_scope_item(const R_dsgraph::DSGraphItem<float, true>& item,
 template<typename T, bool Reverse>
 void CDSGraphManager::r_dsgraph_render_graph_sorted(R_dsgraph::mapDSGraphItems<T, Reverse>& graph, bool _clear)
 {
+#if defined(USE_DX11) && RENDER == R_R4
+    aoe_temporal::SetIdentity(nullptr, nullptr);
+#endif
     if (graph.empty())
         return;
 
@@ -128,12 +131,18 @@ void CDSGraphManager::r_dsgraph_render_graph_sorted(R_dsgraph::mapDSGraphItems<T
 		//{
 		//	//new feature
 		//}
+#if defined(USE_DX11) && RENDER == R_R4
+        aoe_temporal::SetIdentity(V, item.pObject, item.b_hud_mode);
+#endif
 		V->Render(calcLOD(item.ssa, V->vis.sphere.R));
 	}
 
 	if (_clear)
 		graph.clear();
 
+#if defined(USE_DX11) && RENDER == R_R4
+    aoe_temporal::SetIdentity(nullptr, nullptr);
+#endif
 	RCache.set_xform_world(Fidentity);
 }
 
@@ -282,6 +291,7 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
             if (!batch) return;
             RCache.LOD.set_LOD(batch_lod);
             RCache.set_Geometry(batch->geometry);
+            aoe_temporal::SetIdentity(batch.get(), nullptr);
             RCache.Render(D3DPT_TRIANGLELIST, batch->base_vertex, 0, batch->vertex_count, batch_first, batch_count / 3);
             RCache.stat.r.s_static.add(batch_vertices);
             batch.reset();
@@ -419,6 +429,7 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 #endif
 #if defined(USE_DX11) && RENDER == R_R4
             RCache.skeleton_snapshot = packet.shadow_pose.get();
+            aoe_temporal::SetIdentity(item.pVisual, item.pObject);
 #endif
             item.pVisual->Render(LOD);
 #if defined(USE_DX11) && RENDER == R_R4
@@ -438,6 +449,9 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 		if (_clear)
 			queue.clear();
 	}
+#if defined(USE_DX11) && RENDER == R_R4
+    aoe_temporal::SetIdentity(nullptr, nullptr);
+#endif
 }
 
 //////////////////////////////////////////////////////////////////////////

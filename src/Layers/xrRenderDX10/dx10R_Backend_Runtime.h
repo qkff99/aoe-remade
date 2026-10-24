@@ -67,6 +67,9 @@ ICF void CBackend::set_PS(ID3DPixelShader* _ps, LPCSTR _n)
 		PGO(Msg("PGO:Pshader:%x",_ps));
 		stat.ps ++;
 		ps = _ps;
+#if defined(USE_DX11) && RENDER == R_R4
+        temporal_bound_pixel = nullptr;
+#endif
 #ifdef USE_DX11
 		RenderDeviceContext()->PSSetShader(ps, 0, 0);
 #else
@@ -163,6 +166,9 @@ ICF void CBackend::set_VS(ID3DVertexShader* _vs, LPCSTR _n)
 		PGO(Msg("PGO:Vshader:%x",_vs));
 		stat.vs ++;
 		vs = _vs;
+#if defined(USE_DX11) && RENDER == R_R4
+        temporal_bound_vertex = nullptr;
+#endif
 #ifdef USE_DX11
 		RenderDeviceContext()->VSSetShader(vs, 0, 0);
 #else
@@ -316,6 +322,9 @@ IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV, 
 	//UINT IndexCount,
 	//UINT StartIndexLocation,
 	//INT BaseVertexLocation
+#if defined(USE_DX11) && RENDER == R_R4
+    if (!aoe_temporal::Bind(*this, baseV, startI, iIndexCount, true)) aoe_temporal::Restore(*this);
+#endif
 	SRVSManager.Apply();
 	ApplyRTandZB();
 	ApplyVertexLayout();
@@ -348,6 +357,9 @@ IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 startV, u32 PC)
 	stat.polys += PC;
 
 	ApplyPrimitieTopology(Topology);
+#if defined(USE_DX11) && RENDER == R_R4
+    if (!aoe_temporal::Bind(*this, startV, 0, iVertexCount, false)) aoe_temporal::Restore(*this);
+#endif
 	SRVSManager.Apply();
 	ApplyRTandZB();
 	ApplyVertexLayout();
@@ -797,7 +809,11 @@ ICF void CBackend::ApplyRTandZB()
 	if (m_bChangedRTorZB)
 	{
 		m_bChangedRTorZB = false;
-		RenderDeviceContext()->OMSetRenderTargets(sizeof(pRT) / sizeof(pRT[0]), pRT, pZB);
+        u32 targets = sizeof(pRT) / sizeof(pRT[0]);
+#if defined(USE_DX11) && RENDER == R_R4
+        if (!pRT[4]) targets = 4;
+#endif
+		RenderDeviceContext()->OMSetRenderTargets(targets, pRT, pZB);
 	}
 }
 

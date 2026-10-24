@@ -22,6 +22,7 @@ public:
     bool Evaluate(const Frame& frame);
     void ResetHistory() { m_history.Invalidate(); }
     bool Ready() const { return m_created && !m_failed; }
+    bool LastReset() const { return m_lastReset; }
     ID3D11Texture2D* Output() const { return m_output.Get(); }
 private:
     bool Check(FfxErrorCode result, const char* stage);
@@ -37,6 +38,6 @@ private:
     dlss::Size m_render, m_display;
     dlss::History m_history;
     Log m_log = nullptr;
-    bool m_created = false, m_failed = false;
+    bool m_created = false, m_failed = false, m_lastReset = false;
 };
 }

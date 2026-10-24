@@ -30,9 +30,12 @@ public:
     {
         ID3D11Texture2D* color = nullptr;
         ID3D11Texture2D* depth = nullptr; // Normalized hardware depth, NOT view-space Z.
-        ID3D11Texture2D* motion = nullptr; // SSS 23 non-jittered UV displacement.
+        ID3D11Texture2D* motion = nullptr; // Engine-owned non-jittered UV displacement.
+        ID3D11Texture2D* reactive = nullptr;
         Offset jitter;
         float deltaMilliseconds = 0;
+        bool enableSharpening = false;
+        float sharpness = 0.0f;
         std::uint64_t frame = 0;
         bool cameraCut = false;
     };

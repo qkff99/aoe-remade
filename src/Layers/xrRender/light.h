@@ -111,6 +111,7 @@ public:
         Fmatrix query_view, query_world;
         Fvector4 query_parameters;
         bool query_view_valid = false, query_svp = false;
+        u32 hidden_streak = 0;
 #endif
 	}				vis;
 

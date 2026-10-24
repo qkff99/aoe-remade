@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="windows-1251"?>
+<string_table>
+    <string id="ui_mm_video_basic_upscaler"><text>Масштабирование изображения</text></string>
+    <string id="ui_mm_video_basic_upscaler_desc"><text>Выбор NVIDIA DLSS или AMD FSR 3. При выключении сохраняются обычное разрешение и настройки сглаживания. Для включения отключите MSAA. Используются шейдеры из комплекта AOE Remade. Работает только выбранный метод; его качество настраивается ниже. Применение настроек перезапускает рендер. Генерация кадров не используется.</text></string>
+    <string id="ui_mm_video_basic_fsr3_mode"><text>Качество AMD FSR 3</text></string>
+    <string id="ui_mm_video_basic_fsr3_mode_desc"><text>Применяется при выборе FSR 3. Native AA использует полное разрешение, Ultra Quality — промежуточное между полным разрешением и режимом качества. Качество, баланс, производительность и ультрапроизводительность используют масштабирование в 1,5, 1,7, 2 и 3 раза. Работает на DX11, в том числе на видеокартах других производителей. Библиотека NVIDIA не требуется. При включении заменяет SSS TAA и SMAA. Применение настроек перезапускает рендер.</text></string>
+    <string id="ui_mm_video_basic_dlss_sharpness"><text>Резкость масштабирования (CAS)</text></string>
+    <string id="ui_mm_video_basic_dlss_sharpness_desc"><text>Общее усиление резкости после восстановления изображения DLSS или FSR, до экранных эффектов и интерфейса. 0 выключает фильтр, 1 задаёт максимальную силу. Применяется без перезапуска рендера. Не меняет резкость Atmospherics и эффекты приборов ночного видения. Высокие значения могут усиливать шум и контуры. Не применяется при выключенном апскейлере и резервном пространственном масштабировании.</text></string>
+    <string id="ui_mm_lst_upscaler_dlss"><text>NVIDIA DLSS</text></string>
+    <string id="ui_mm_lst_upscaler_fsr3"><text>AMD FSR 3</text></string>
+    <string id="ui_mm_lst_fsr3_native_aa"><text>Native AA</text></string>
+    <string id="ui_mm_video_basic_dlss_mode"><text>Качество NVIDIA DLSS</text></string>
+    <string id="ui_mm_video_basic_dlss_mode_desc"><text>DLAA использует полное разрешение, Ultra Quality — промежуточное между полным разрешением и режимом качества. Остальные режимы восстанавливают изображение из меньшего разрешения. Требуются видеокарта RTX и библиотека NVIDIA DLSS. Перед включением отключите MSAA. При работе DLSS заменяет SSS TAA и SMAA. Применение настроек перезапускает рендер; отмена сохраняет текущие настройки.</text></string>
+    <string id="ui_mm_video_basic_dlss_preset"><text>Пресет NVIDIA DLSS</text></string>
+    <string id="ui_mm_video_basic_dlss_preset_desc"><text>Модель восстановления изображения задаётся отдельно от режима качества. По умолчанию NVIDIA выбирает рекомендуемый пресет. J, K, L и M явно запрашивают соответствующую модель; настройки драйвера могут изменить результат. Для этих пресетов используется библиотека DLSS 310.9.1. Применение настроек перезапускает рендер.</text></string>
+    <string id="ui_mm_lst_dlss_off"><text>Выключено</text></string>
+    <string id="ui_mm_lst_dlss_dlaa"><text>DLAA (полное разрешение)</text></string>
+    <string id="ui_mm_lst_dlss_quality"><text>Качество</text></string>
+    <string id="ui_mm_lst_dlss_ultra_quality"><text>Ультракачество</text></string>
+    <string id="ui_mm_lst_dlss_balanced"><text>Баланс</text></string>
+    <string id="ui_mm_lst_dlss_performance"><text>Производительность</text></string>
+    <string id="ui_mm_lst_dlss_ultra_performance"><text>Ультрапроизводительность</text></string>
+    <string id="ui_mm_lst_dlss_default"><text>По умолчанию (выбор NVIDIA)</text></string>
+    <string id="ui_mm_lst_dlss_j"><text>J</text></string>
+    <string id="ui_mm_lst_dlss_k"><text>K</text></string>
+    <string id="ui_mm_lst_dlss_l"><text>L</text></string>
+    <string id="ui_mm_lst_dlss_m"><text>M</text></string>
+</string_table>

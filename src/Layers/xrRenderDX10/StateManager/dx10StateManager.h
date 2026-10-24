@@ -12,6 +12,22 @@ public:
 	void Reset();
 	//	Sends states to DX10 runtime, creates new state objects if nesessary
 	void Apply();
+#if defined(USE_DX11) && RENDER == R_R4
+    void SetTemporalTarget(bool enabled, bool block_legacy = false, bool write_motion = true)
+    {
+        if (m_temporal_target != enabled || m_temporal_legacy_blocked != block_legacy ||
+            m_temporal_motion_write != write_motion)
+        {
+            m_temporal_target = enabled;
+            m_temporal_legacy_blocked = block_legacy;
+            m_temporal_motion_write = write_motion;
+            m_bBSNeedApply = true;
+        }
+    }
+    bool TemporalHistorySafe();
+    // Colour blending without alpha-to-coverage: motion/reactive are weighted by the draw's alpha.
+    bool TemporalBlended();
+#endif
 #ifdef USE_DX11
     bool ShadowBatchStateSafe();
 #endif
@@ -92,6 +108,11 @@ private:
 	bool m_bOverrideScissoring;
 	BOOL m_bOverrideScissoringValue;
 	UINT m_uiSampleMask;
+#if defined(USE_DX11) && RENDER == R_R4
+    bool m_temporal_target = false;
+    bool m_temporal_legacy_blocked = false;
+    bool m_temporal_motion_write = true;
+#endif
 };
 
 extern dx10StateManager StateManager;

@@ -23,6 +23,9 @@
 
 #include "fvf.h"
 #include "RenderContext.h"
+#if defined(USE_DX11) && RENDER == R_R4
+#include "../xrRenderPC_R4/Dlss/TemporalShaders.h"
+#endif
 
 const u32 CULL_CCW = D3DCULL_CCW;
 const u32 CULL_CW = D3DCULL_CW;
@@ -150,7 +153,11 @@ public:
 #endif
 private:
 	// Render-targets
+#if defined(USE_DX11) && RENDER == R_R4
+    ID3DRenderTargetView* pRT[5];
+#else
 	ID3DRenderTargetView* pRT[4];
+#endif
 	ID3DDepthStencilView* pZB;
 
 	// Vertices/Indices/etc
@@ -233,6 +240,11 @@ private:
 public:
 
 #if defined(USE_DX11) && RENDER == R_R4
+    friend bool aoe_temporal::Bind(CBackend&, unsigned, unsigned, unsigned, bool);
+    friend void aoe_temporal::Restore(CBackend&);
+    friend void aoe_temporal::SetMatrix(CBackend&, R_constant*, const Fmatrix&);
+    ID3D11VertexShader* temporal_bound_vertex = nullptr;
+    ID3D11PixelShader* temporal_bound_pixel = nullptr;
     void InvalidateAfterCommandList() { Invalidate(); }
     CTexture* shadow_texture_source = nullptr;
     ID3D11ShaderResourceView* shadow_texture_view = nullptr;
@@ -241,7 +253,7 @@ public:
     const SkeletonRenderSnapshot* skeleton_snapshot = nullptr;
     ID3D11ShaderResourceView* TextureView(CTexture* source, ID3D11ShaderResourceView* view) const
     {
-        return source == shadow_texture_source ? shadow_texture_view : view;
+        return source == shadow_texture_source ? shadow_texture_view : aoe_temporal::TextureView(source, view);
     }
 #endif
 	struct _stats
@@ -428,9 +440,19 @@ public:
 	}
 
 	// constants - direct (fast)
+#if defined(USE_DX11) && RENDER == R_R4
+    ICF void set_c(R_constant* C, const Fmatrix& A) { if (C) aoe_temporal::SetMatrix(*this, C, A); }
+    ICF void set_c_unjittered(LPCSTR name, const Fmatrix& value)
+    {
+        if (ctable) if (auto* constant = ctable->get(name)) constants.set(constant, value);
+    }
+    ICF void set_c(R_constant* C, const Fvector4& A) { if (C) constants.set(C, A); }
+    ICF void set_c(R_constant* C, float x, float y, float z, float w) { if (C) constants.set(C, x, y, z, w); }
+#else
 	ICF void set_c(R_constant* C, const Fmatrix& A) { if (C) constants.set(C, A); }
 	ICF void set_c(R_constant* C, const Fvector4& A) { if (C) constants.set(C, A); }
 	ICF void set_c(R_constant* C, float x, float y, float z, float w) { if (C) constants.set(C, x, y, z, w); }
+#endif
 #ifdef USE_DX11
     IC bool set_vertex_array_block(R_constant* constant, const Fvector4* data, u32 count);
 #endif

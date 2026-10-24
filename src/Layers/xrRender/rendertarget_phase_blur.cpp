@@ -994,6 +994,9 @@ void CRenderTarget::phase_ssfx_fog_scattering()
 void CRenderTarget::phase_ssfx_motion_blur()
 {
     PROF_EVENT("RenderTarget.SSFX.MotionBlur");
+#if RENDER == R_R4
+    if (dlss::Configured()) PrepareBlurMotion();
+#endif
 	u32 Offset = 0;
 	Fvector2 p0, p1;
 
@@ -1021,8 +1024,13 @@ void CRenderTarget::phase_ssfx_motion_blur()
 	// Draw COLOR
 	RCache.set_Element(s_ssfx_motion_blur->E[0]);
 
+#if RENDER == R_R4
+    RCache.set_c_unjittered("m_current", Matrix_current);
+    RCache.set_c_unjittered("m_previous", Matrix_previous);
+#else
 	RCache.set_c("m_current", Matrix_current);
 	RCache.set_c("m_previous", Matrix_previous);
+#endif
 
 	RCache.set_Geometry(g_combine);
 	RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);

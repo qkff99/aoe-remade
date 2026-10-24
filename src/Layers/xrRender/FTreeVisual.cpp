@@ -521,6 +521,7 @@ void FTreeVisual::PrepareFrame()
     {
         previous_tree_setup = frame_tree_setup;
         frame_tree_setup.calculate();
+        aoe_temporal::AnimationHistory(false, previous_tree_setup.wave, previous_tree_setup.wind);
     }
 }
 #endif

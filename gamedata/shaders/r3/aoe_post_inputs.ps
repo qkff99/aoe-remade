@@ -1,0 +1,25 @@
+// Present existing postprocess shaders with display-sized position, heat and depth.
+Texture2D<float4> aoe_position;
+Texture2D<float4> aoe_heat;
+Texture2D<float> aoe_depth;
+float4 aoe_post_scale; // render/display xy, current jitter in render pixels zw
+
+struct AOE_PostInputs
+{
+    float4 position : SV_Target0;
+    float4 heat : SV_Target1;
+    float depth : SV_Depth;
+};
+
+AOE_PostInputs main(float4 position : SV_Position, float2 uv : TEXCOORD0)
+{
+    uint width, height;
+    aoe_depth.GetDimensions(width, height);
+    int2 pixel = clamp(int2(floor(position.xy * aoe_post_scale.xy + aoe_post_scale.zw)),
+        int2(0, 0), int2(width, height) - 1);
+    AOE_PostInputs result;
+    result.position = aoe_position.Load(int3(pixel, 0));
+    result.heat = aoe_heat.Load(int3(pixel, 0));
+    result.depth = aoe_depth.Load(int3(pixel, 0));
+    return result;
+}

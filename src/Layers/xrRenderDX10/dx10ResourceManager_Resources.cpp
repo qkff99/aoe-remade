@@ -105,6 +105,9 @@ void CResourceManager::_DeleteState(const SState* state)
 //--------------------------------------------------------------------------------------------------------------
 SPass* CResourceManager::_CreatePass(const SPass& proto)
 {
+#if defined(USE_DX11) && RENDER == R_R4
+    if (proto.vs && proto.ps) aoe_temporal::RegisterPass(proto.vs->vs, proto.ps->ps);
+#endif
 	PROF_EVENT("Resources.CreatePass");
 	xrCriticalSectionGuard guard(creationGuard);
 	{
@@ -239,6 +242,9 @@ SVS* CResourceManager::_CreateVS(LPCSTR _name)
 void CResourceManager::_DeleteVS(const SVS* vs)
 {
 	if (0 == (vs->dwFlags & xr_resource_flagged::RF_REGISTERED)) return;
+#if defined(USE_DX11) && RENDER == R_R4
+    aoe_temporal::Forget(vs->vs);
+#endif
 	xrCriticalSectionGuard guard(creationGuard);
 	LPSTR N = LPSTR(*vs->cName);
 	map_VS::iterator I = m_vs.find(N);

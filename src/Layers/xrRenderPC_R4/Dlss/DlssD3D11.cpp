@@ -178,8 +178,9 @@ bool D3D11Backend::Validate(const Frame& frame) const
     if (!m_output) return false;
     ComPtr<ID3D11Device> resourceDevice;
     m_output->GetDevice(&resourceDevice);
-    for (auto* input : {frame.color, frame.depth, frame.motion})
+    for (auto* input : {frame.color, frame.depth, frame.motion, frame.reactive})
     {
+        if (!input) continue;
         D3D11_TEXTURE2D_DESC desc;
         input->GetDesc(&desc);
         if (desc.Width != m_render.width || desc.Height != m_render.height || desc.SampleDesc.Count != 1 ||
@@ -193,6 +194,12 @@ bool D3D11Backend::Validate(const Frame& frame) const
     frame.motion->GetDesc(&motion);
     if (depth.Format != DXGI_FORMAT_R32_FLOAT && depth.Format != DXGI_FORMAT_R32_TYPELESS &&
         depth.Format != DXGI_FORMAT_R24G8_TYPELESS && depth.Format != DXGI_FORMAT_R24_UNORM_X8_TYPELESS) return false;
+    if (frame.reactive)
+    {
+        D3D11_TEXTURE2D_DESC reactive{};
+        frame.reactive->GetDesc(&reactive);
+        if (reactive.Format != DXGI_FORMAT_R8_UNORM) return false;
+    }
     return motion.Format == DXGI_FORMAT_R16G16_FLOAT || motion.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ||
         motion.Format == DXGI_FORMAT_R32G32_FLOAT;
 }
@@ -213,6 +220,7 @@ bool D3D11Backend::Evaluate(const Frame& frame)
     eval.Feature.pInOutput = m_output.Get();
     eval.pInDepth = frame.depth;
     eval.pInMotionVectors = frame.motion;
+    eval.pInBiasCurrentColorMask = frame.reactive;
     eval.InJitterOffsetX = frame.jitter.x;
     eval.InJitterOffsetY = frame.jitter.y;
     const Offset motionScale = MotionScale(m_render);

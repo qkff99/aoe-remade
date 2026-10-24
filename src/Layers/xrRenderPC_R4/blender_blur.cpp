@@ -581,7 +581,7 @@ void CBlender_ssfx_motion_blur::Compile(CBlender_Compile& C)
 		C.r_dx10Texture("s_position", r2_RT_P);
 		C.r_dx10Texture("s_image", r2_RT_generic0);
 		
-		C.r_dx10Texture("ssfx_motion_vectors", r2_RT_ssfx_motion_vectors);
+		C.r_dx10Texture("ssfx_motion_vectors", dlss::Configured() ? "$user$aoe_blur_vectors" : r2_RT_ssfx_motion_vectors);
 
 		C.r_dx10Sampler("smp_nofilter");
 		C.r_dx10Sampler("smp_linear");
@@ -594,7 +594,7 @@ void CBlender_ssfx_motion_blur::Compile(CBlender_Compile& C)
 		C.r_dx10Texture("s_position", r2_RT_P);
 		C.r_dx10Texture("s_image", r2_RT_ssfx_temp);
 		
-		C.r_dx10Texture("ssfx_motion_vectors", r2_RT_ssfx_motion_vectors);
+		C.r_dx10Texture("ssfx_motion_vectors", dlss::Configured() ? "$user$aoe_blur_vectors" : r2_RT_ssfx_motion_vectors);
 
 		C.r_dx10Sampler("smp_nofilter");
 		C.r_dx10Sampler("smp_rtlinear");

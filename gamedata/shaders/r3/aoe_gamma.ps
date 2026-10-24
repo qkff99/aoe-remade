@@ -1,0 +1,10 @@
+// Convert the tonemapped scene between display encoding and linear FSR input.
+Texture2D<float4> aoe_image;
+cbuffer AOE_Gamma : register(b0) { float4 aoe_gamma; };
+
+float4 main(float4 position : SV_Position) : SV_Target
+{
+    float4 color = aoe_image.Load(int3(position.xy, 0));
+    color.rgb = pow(max(color.rgb, 0), aoe_gamma.xxx);
+    return color;
+}

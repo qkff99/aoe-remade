@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "Dlss/TemporalShaders.h"
 #include "../../xrEngine/igame_persistent.h"
 #include "../../xrEngine/environment.h"
 
@@ -154,11 +155,13 @@ void CRenderTarget::phase_combine()
 		//RCache.set_ColorWriteEnable					();
 		//	Moved to shader!
 		//RCache.set_Z(FALSE);
+		aoe_temporal::SetSceneGeometry(true);
 		g_pGamePersistent->Environment().RenderSky();
 
 		//	Igor: Render clouds before compine without Z-test
 		//	to avoid siluets. HOwever, it's a bit slower process.
 		g_pGamePersistent->Environment().RenderClouds();
+		aoe_temporal::SetSceneGeometry(false);
 
 		//	Moved to shader!
 		//RCache.set_Z(TRUE);
@@ -383,8 +386,10 @@ void CRenderTarget::phase_combine()
 
 	// Final water rendering ( All the code above can be omitted if the Water module isn't installed )
 	RCache.set_xform_world(Fidentity);
+	aoe_temporal::SetSceneGeometry(true);
 	RImplementation.GMBase.r_dsgraph_render_water();
-	
+	aoe_temporal::SetSceneGeometry(false);
+
 	{
 		if (RImplementation.o.ssfx_rain)
 		{
@@ -396,7 +401,9 @@ void CRenderTarget::phase_combine()
 				u_setrt(rt_Generic_0_r, 0, rt_ssfx_motion_vectors, rt_MSAADepth->pZRT);
 		}
 
+		aoe_temporal::SetSceneGeometry(true);
 		g_pGamePersistent->Environment().RenderLast(); // rain/thunder-bolts
+		aoe_temporal::SetSceneGeometry(false);
 	}
 
 	/*if (ssfx_PrevPos_Requiered)
@@ -427,7 +434,9 @@ void CRenderTarget::phase_combine()
 		RCache.set_ColorWriteEnable();
 		//	TODO: DX10: CHeck this!
 		//g_pGamePersistent->Environment().RenderClouds	();
+		aoe_temporal::SetSceneGeometry(true);
 		RImplementation.render_forward();
+		aoe_temporal::SetSceneGeometry(false);
 		if (g_pGamePersistent) g_pGamePersistent->OnRenderPPUI_main(); // PP-UI
 	}
 

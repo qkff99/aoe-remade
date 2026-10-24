@@ -1142,7 +1142,8 @@ static HRESULT create_shader(
 	u32 const buffer_size,
 	LPCSTR const file_name,
 	void*& result,
-	bool const disasm
+	bool const disasm,
+    LPCSTR shader_name, const void* source, u32 source_size, const D3D_SHADER_MACRO* defines, u32 flags, LPCSTR entry
 )
 {
 	PROF_EVENT("Shader.CreateFromBytecode");
@@ -1401,6 +1402,10 @@ static HRESULT create_shader(
 		NODEFAULT;
 	}
 
+    if (SUCCEEDED(_result) && (pTarget[0] == 'v' || pTarget[0] == 'p'))
+        aoe_temporal::Register(shader_name, pTarget, entry, source, source_size, defines, flags,
+            pTarget[0] == 'v' ? static_cast<ID3D11DeviceChild*>(static_cast<SVS*>(result)->vs) :
+                static_cast<ID3D11DeviceChild*>(static_cast<SPS*>(result)->ps), buffer, buffer_size);
 	if (disasm)
 	{
 		ID3DBlob* disasm = 0;
@@ -2251,7 +2256,8 @@ HRESULT CRender::shader_compile(
 
 					if (real_crc == crc)
 					{
-						_result = create_shader(pTarget, (DWORD*)file->pointer(), file->elapsed(), file_name, result, o.disasm);
+						_result = create_shader(pTarget, (DWORD*)file->pointer(), file->elapsed(), file_name, result, o.disasm,
+                            name, pSrcData, SrcDataLen, defines, Flags, pFunctionName);
 					}
 				}
 				else
@@ -2269,7 +2275,8 @@ HRESULT CRender::shader_compile(
 
 			if (real_crc == crc)
 			{
-				_result = create_shader(pTarget, (DWORD*)file->pointer(), file->elapsed(), file_name, result, o.disasm);
+				_result = create_shader(pTarget, (DWORD*)file->pointer(), file->elapsed(), file_name, result, o.disasm,
+                    name, pSrcData, SrcDataLen, defines, Flags, pFunctionName);
 			}
 		}
 		file->close();
@@ -2309,7 +2316,7 @@ HRESULT CRender::shader_compile(
 			FS.w_close(file);
 
 			_result = create_shader(pTarget, (DWORD*)pShaderBuf->GetBufferPointer(), (u32)pShaderBuf->GetBufferSize(),
-			                        file_name, result, o.disasm);
+			                        file_name, result, o.disasm, name, pSrcData, SrcDataLen, defines, Flags, pFunctionName);
 		}
 		else
 		{

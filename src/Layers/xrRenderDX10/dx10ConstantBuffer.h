@@ -13,6 +13,12 @@ public:
 
 	bool Similar(dx10ConstantBuffer& _in);
 	ID3DBuffer* GetBuffer() { return m_pBuffer; }
+    bool ReadBytes(u32 offset, void* destination, u32 bytes) const
+    {
+        if (offset > m_uiBufferSize || bytes > m_uiBufferSize - offset) return false;
+        memcpy(destination, static_cast<const u8*>(m_pBufferData) + offset, bytes);
+        return true;
+    }
 
 	void Flush();
     static void ResetStats();

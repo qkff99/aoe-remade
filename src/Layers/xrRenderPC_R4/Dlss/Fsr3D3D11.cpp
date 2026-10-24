@@ -36,6 +36,7 @@ private:
 };
 static FfxResource Resource(ID3D11Texture2D* texture, const wchar_t* name, bool uav = false)
 {
+    if (!texture) return ffxGetResourceDX11(nullptr, {}, name, FFX_RESOURCE_STATE_COMPUTE_READ);
     return ffxGetResourceDX11(texture, GetFfxResourceDescriptionDX11(texture), name,
         uav ? FFX_RESOURCE_STATE_UNORDERED_ACCESS : FFX_RESOURCE_STATE_COMPUTE_READ);
 }
@@ -172,7 +173,7 @@ catch (...)
 }
 bool D3D11Backend::Validate(const Frame& frame) const
 {
-    if (!frame.color || !frame.depth || !frame.motion || frame.color == m_output.Get() ||
+    if (!frame.color || !frame.depth || !frame.motion || !frame.reactive || frame.color == m_output.Get() ||
         !std::isfinite(frame.jitter.x) || !std::isfinite(frame.jitter.y) ||
         !std::isfinite(frame.deltaMilliseconds) || frame.deltaMilliseconds < 0 ||
         !std::isfinite(frame.cameraNear) || !std::isfinite(frame.cameraFar) ||
@@ -183,8 +184,9 @@ bool D3D11Backend::Validate(const Frame& frame) const
     if (!m_output) return false;
     ComPtr<ID3D11Device> resourceDevice;
     m_output->GetDevice(&resourceDevice);
-    for (auto* input : {frame.color, frame.depth, frame.motion})
+    for (auto* input : {frame.color, frame.depth, frame.motion, frame.reactive})
     {
+        if (!input) continue;
         D3D11_TEXTURE2D_DESC desc;
         input->GetDesc(&desc);
         ComPtr<ID3D11Device> device;
@@ -196,6 +198,12 @@ bool D3D11Backend::Validate(const Frame& frame) const
     frame.depth->GetDesc(&depth); frame.motion->GetDesc(&motion);
     if (depth.Format != DXGI_FORMAT_R32_FLOAT && depth.Format != DXGI_FORMAT_R32_TYPELESS &&
         depth.Format != DXGI_FORMAT_R24G8_TYPELESS && depth.Format != DXGI_FORMAT_R24_UNORM_X8_TYPELESS) return false;
+    if (frame.reactive)
+    {
+        D3D11_TEXTURE2D_DESC reactive{};
+        frame.reactive->GetDesc(&reactive);
+        if (reactive.Format != DXGI_FORMAT_R8_UNORM) return false;
+    }
     return motion.Format == DXGI_FORMAT_R16G16_FLOAT || motion.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ||
         motion.Format == DXGI_FORMAT_R32G32_FLOAT;
 }
@@ -214,12 +222,13 @@ try
     dispatch.color = Resource(frame.color, L"FSR3 color");
     dispatch.depth = Resource(frame.depth, L"FSR3 depth");
     dispatch.motionVectors = Resource(frame.motion, L"FSR3 motion");
+    dispatch.reactive = Resource(frame.reactive, L"FSR3 engine reactivity");
     dispatch.dilatedDepth = Resource(m_shared[0].Get(), L"FSR3 dilated depth", true);
     dispatch.dilatedMotionVectors = Resource(m_shared[1].Get(), L"FSR3 dilated motion", true);
     dispatch.reconstructedPrevNearestDepth = Resource(m_shared[2].Get(), L"FSR3 reconstructed depth", true);
     dispatch.output = Resource(m_output.Get(), L"FSR3 output", true);
     dispatch.jitterOffset = {frame.jitter.x, frame.jitter.y};
-    // SSS stores currentUV - previousUV, unlike OGSR's clip-space vectors.
+    // Owned motion stores currentUV - previousUV, without raster jitter.
     const auto scale = dlss::MotionScale(m_render);
     dispatch.motionVectorScale = {scale.x, scale.y};
     dispatch.renderSize = {m_render.width, m_render.height};
@@ -229,9 +238,10 @@ try
     dispatch.cameraNear = frame.cameraNear; dispatch.cameraFar = frame.cameraFar;
     dispatch.cameraFovAngleVertical = frame.verticalFov;
     dispatch.viewSpaceToMetersFactor = 1.0f;
-    dispatch.reset = m_history.Begin(frame.frame, frame.cameraCut);
+    dispatch.enableSharpening = frame.enableSharpening;
+    dispatch.sharpness = frame.sharpness;
+    dispatch.reset = m_lastReset = m_history.Begin(frame.frame, frame.cameraCut);
     // Same post-upscale CAS as DLSS; do not apply RCAS a second time.
-    // Reactive/composition masks are optional, currently absent as in OGSR.
     ContextScope state(m_context.Get(), m_state.Get());
     ID3D11SamplerState* samplers[] = {m_samplers[0].Get(), m_samplers[1].Get()};
     m_context->CSSetSamplers(0, 2, samplers);

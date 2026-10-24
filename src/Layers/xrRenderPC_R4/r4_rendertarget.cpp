@@ -91,27 +91,37 @@ public:
     void Compile(CBlender_Compile& C) override
     {
         IBlender::Compile(C);
-        if (C.iElement > 2) return;
-        C.r_Pass("stub_screen_space", C.iElement == 2 ? "dlss_sharpen" : "dlss_copy", FALSE, FALSE, FALSE);
-        C.r_dx10Texture("s_image", C.iElement == 1 ? r2_RT_albedo : "$user$dlss_output");
-        C.r_dx10Sampler("smp_rtlinear");
+        if (C.iElement > 3) return;
+        C.r_Pass("aoe_screen",
+            C.iElement == 3 ? "aoe_gamma" : C.iElement == 2 ? "aoe_sharpen" : "aoe_copy",
+            FALSE, FALSE, FALSE);
+        C.r_dx10Texture("aoe_image",
+            C.iElement == 1 || C.iElement == 3 ? r2_RT_albedo : "$user$dlss_output");
+        const u32 sampler = C.r_dx10Sampler("aoe_sampler");
+        C.i_dx10Address(sampler, D3DTADDRESS_CLAMP);
+        C.i_dx10Filter(sampler, D3DTEXF_LINEAR, D3DTEXF_NONE, D3DTEXF_LINEAR);
         C.r_End();
     }
 };
 
-class CBlender_dlss_ui_depth : public IBlender
+class CBlender_aoe_inputs : public IBlender
 {
 public:
-    CBlender_dlss_ui_depth() { description.CLS = 0; }
-    LPCSTR getComment() override { return "Native PDA screen occlusion depth"; }
+    CBlender_aoe_inputs() { description.CLS = 0; }
+    LPCSTR getComment() override { return "AOE-owned temporal motion and display inputs"; }
     BOOL canBeDetailed() override { return FALSE; }
     BOOL canBeLMAPped() override { return FALSE; }
     void Compile(CBlender_Compile& C) override
     {
         IBlender::Compile(C);
-        if (C.iElement != 0) return;
-        C.r_Pass("stub_screen_space", "dlss_ui_depth", FALSE, TRUE, TRUE);
-        C.r_dx10Texture("s_scene_depth", "$user$dlss_scene_depth");
+        if (C.iElement > 2) return;
+        C.r_Pass("aoe_screen", "null", C.iElement == 0 ? "aoe_motion_resolve" : C.iElement == 1 ? "aoe_post_inputs" : "aoe_blur_motion", false,
+            C.iElement == 1, C.iElement == 1);
+        C.r_dx10Texture("aoe_depth", "$user$dlss_scene_depth");
+        C.r_dx10Texture("aoe_material_motion", "$user$aoe_material_motion");
+        C.r_dx10Texture("aoe_position", r2_RT_P);
+        C.r_dx10Texture("aoe_heat", r2_RT_heat);
+        C.r_dx10Texture("aoe_legacy_motion", r2_RT_ssfx_motion_vectors);
         C.r_End();
     }
 };
@@ -1380,8 +1390,17 @@ CRenderTarget::CRenderTarget()
 		t_dlss_output->surface_set(dlss::Output());
 		t_dlss_scene_depth.create("$user$dlss_scene_depth");
 		t_dlss_scene_depth->surface_set(dlss::SceneDepthTexture());
-		CBlender_dlss_ui_depth uiDepth;
-		s_dlss_ui_depth.create(&uiDepth, "dlss_ui_depth");
+        rt_aoe_motion.create("$user$aoe_material_motion", dlss::RenderWidth(), dlss::RenderHeight(), D3DFMT_A16B16G16R16F);
+        rt_aoe_motion_resolved.create("$user$aoe_motion", dlss::RenderWidth(), dlss::RenderHeight(), D3DFMT_G16R16F);
+        rt_aoe_reactive.create("$user$aoe_reactive", dlss::RenderWidth(), dlss::RenderHeight(), D3DFMT_L8);
+        rt_aoe_linear_color.create("$user$aoe_linear_color", dlss::RenderWidth(), dlss::RenderHeight(), D3DFMT_A16B16G16R16F);
+        rt_aoe_post_position.create("$user$aoe_post_position", Device.dwWidth, Device.dwHeight, D3DFMT_A16B16G16R16F);
+        rt_aoe_post_heat.create("$user$aoe_post_heat", Device.dwWidth, Device.dwHeight, D3DFMT_A8R8G8B8);
+        rt_aoe_blur_vectors.create("$user$aoe_blur_vectors", dlss::RenderWidth(), dlss::RenderHeight(), D3DFMT_A16B16G16R16F);
+        CBlender_aoe_inputs inputs;
+        s_aoe_motion_resolve.create(&inputs, "aoe_motion_resolve");
+        s_aoe_post_inputs.create(&inputs, "aoe_post_inputs");
+        s_aoe_blur_vectors.create(&inputs, "aoe_blur_motion");
 		CBlender_dlss_postprocess blender;
 		s_dlss_postprocess.create(&blender, "dlss_postprocess");
 		CBlender_dlss_copy copy;

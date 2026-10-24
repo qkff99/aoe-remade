@@ -2,6 +2,7 @@
 #include "DlssIntegration.h"
 #include "DlssD3D11.h"
 #include "Fsr3D3D11.h"
+#include "TemporalShaders.h"
 #include "../../../xrEngine/igame_persistent.h"
 #include "../../../xrEngine/RendererError.h"
 
@@ -16,7 +17,7 @@ dlss::Size renderSize;
 dlss::Offset rasterJitter;
 dlss::Offset previousJitter;
 bool inScene = false, mainView = false, configured = false;
-unsigned jitterIndex = 0;
+unsigned jitterIndex = 0, traceEvaluations = 0;
 Fvector lastPosition, lastDirection;
 float lastFov = 0;
 bool haveCamera = false;
@@ -47,7 +48,7 @@ void ActivationFailed(const char* reason, const char* recovery)
     ShowBackendError(Method());
 }
 const char* BackendReason(const char* fallback) { return backendError[0] ? backendError : fallback; }
-void ResetHistory() { backend.ResetHistory(); fsrBackend.ResetHistory(); }
+void ResetHistory() { backend.ResetHistory(); fsrBackend.ResetHistory(); aoe_temporal::ResetHistory(); }
 }
 
 unsigned RenderScreenWidth() { return inScene ? dlss::RenderWidth() : Device.dwWidth; }
@@ -69,19 +70,14 @@ void InitializeTargets()
     }
     useFsr = ps_r_upscaler == 2;
     string_path marker;
-    for (const char* shader : {"r3\\screenspace_mvectors.h", "r3\\dlss_contract.h", "r3\\dlss_ui_depth.ps",
-        "r3\\dlss_copy.ps", "r3\\dlss_sharpen.ps", "r3\\dlss_cas.h"})
+    for (const char* shader : {"r3\\aoe_screen.vs", "r3\\aoe_copy.ps", "r3\\aoe_sharpen.ps",
+        "r3\\aoe_cas.h", "r3\\aoe_gamma.ps", "r3\\aoe_motion_resolve.ps", "r3\\aoe_post_inputs.ps",
+        "r3\\aoe_blur_motion.ps"})
     {
         if (FS.exist(marker, "$game_shaders$", shader)) continue;
         string256 reason;
         xr_sprintf(reason, "Required shader is missing: %s", shader);
-        ActivationFailed(reason, "Install the shader compatibility patch matching this engine, then restart the game.");
-        return;
-    }
-    if (!RImplementation.o.ssfx_motionvectors)
-    {
-        ActivationFailed("SSS motion vectors are unavailable.",
-            "Install the matching SSS 23 shader compatibility patch, then restart the game.");
+        ActivationFailed(reason, "Install the AOE Remade engine shader files, then restart the game.");
         return;
     }
     if (RImplementation.o.dx10_msaa)
@@ -161,6 +157,7 @@ void InitializeTargets()
     }
     renderSize = size;
     configured = true;
+    aoe_temporal::Initialize();
     if (useFsr)
         Msg("[FSR3] Initialized; awaiting first scene evaluation: quality=%u scene=%ux%u display=%ux%u",
             ps_r_fsr3_quality, size.width, size.height, display.width, display.height);
@@ -171,6 +168,7 @@ void InitializeTargets()
 
 void ReleaseTargets()
 {
+    aoe_temporal::Release();
     inScene = mainView = configured = false;
     jitterIndex = 0;
     haveCamera = false;
@@ -185,11 +183,14 @@ void ReleaseTargets()
     renderSize = {};
 }
 
-void ShutdownDevice() { ReleaseTargets(); backend.Shutdown(); }
+void ShutdownDevice() { ReleaseTargets(); aoe_temporal::Shutdown(); backend.Shutdown(); }
 unsigned RenderWidth() { return renderSize.Valid() ? renderSize.width : Device.dwWidth; }
 unsigned RenderHeight() { return renderSize.Valid() ? renderSize.height : Device.dwHeight; }
 bool Configured() { return configured; }
 bool Active() { return configured && inScene && mainView && (useFsr ? fsrBackend.Ready() : backend.Ready()); }
+bool TemporalScene() { return configured && inScene && mainView; }
+bool UsesFsr() { return useFsr && configured; }
+bool LinearColor() { return UsesFsr() && !RImplementation.o.dx11_hdr10; }
 Offset RasterJitter() { return rasterJitter; }
 Offset PreviousRasterJitter() { return previousJitter; }
 ID3DDepthStencilView* SceneDepth() { return inScene && configured ? sceneDepthView.Get() : HW.pBaseZB; }
@@ -198,6 +199,7 @@ ID3D11Texture2D* Output() { return useFsr ? fsrBackend.Output() : backend.Output
 
 void BeginScene()
 {
+    aoe_temporal::DisplayInputs(nullptr, nullptr, nullptr, nullptr);
     inScene = true;
     if (configured)
     {
@@ -219,9 +221,16 @@ void BeginScene()
         lastDirection = Device.vCameraDirection;
         lastFov = Device.fFOV;
         haveCamera = true;
-        SSManager.SetMipLODBias(ps_r__tf_Mipbias + log2f(float(RenderWidth()) / Device.dwWidth));
+        // FSR3 recommends at least -1 before the resolution ratio. Keep a
+        // stronger user setting, but prevent high-frequency foliage/effects
+        // from aliasing at zero or positive bias.
+        const float baseBias = useFsr && ps_r__tf_Mipbias > -1.0f ? -1.0f : ps_r__tf_Mipbias;
+        SSManager.SetMipLODBias(baseBias + log2f(float(RenderWidth()) / Device.dwWidth));
     }
+    // r_upscaler_jitter 0 is a diagnostic: temporal reconstruction without sub-pixel jitter.
     rasterJitter = Active() ? Jitter(jitterIndex++, renderSize, {Device.dwWidth, Device.dwHeight}) : Offset{};
+    if (!ps_r_upscaler_jitter) rasterJitter = {};
+    if (TemporalScene()) aoe_temporal::BeginFrame();
 }
 
 void EndScene(bool invalidateHistory)
@@ -233,7 +242,9 @@ void EndScene(bool invalidateHistory)
     if (invalidateHistory) { ResetHistory(); jitterIndex = 0; haveCamera = false; previousJitter = {}; }
 }
 
-bool Evaluate(ID3D11Texture2D* color, ID3D11Texture2D* motion)
+void TraceEvaluations(unsigned count) { traceEvaluations = count; }
+
+bool Evaluate(ID3D11Texture2D* color, ID3D11Texture2D* motion, ID3D11Texture2D* reactive)
 {
     if (!Active()) return false;
     PROF_EVENT_DYNAMIC(useFsr ? "Render.Upscaler.Evaluate.FSR3" : "Render.Upscaler.Evaluate.DLSS");
@@ -241,8 +252,11 @@ bool Evaluate(ID3D11Texture2D* color, ID3D11Texture2D* motion)
     frame.color = color;
     frame.depth = sceneDepth.Get();
     frame.motion = motion;
+    frame.reactive = reactive;
     frame.jitter = rasterJitter;
     frame.deltaMilliseconds = Device.fTimeDelta * 1000.0f;
+    frame.enableSharpening = useFsr && ps_r_dlss_sharpness > 0.0f;
+    frame.sharpness = clampr(ps_r_dlss_sharpness, 0.0f, 1.0f);
     frame.frame = Device.dwFrame;
     // Derive the actual main-view near/far/FOV from its projection, including
     // camera overrides, rather than assuming the environment's nominal range.
@@ -250,6 +264,20 @@ bool Evaluate(ID3D11Texture2D* color, ID3D11Texture2D* motion)
     frame.cameraFar = -Device.mProject._43 / (Device.mProject._33 - 1.0f);
     frame.verticalFov = 2.0f * atanf(1.0f / Device.mProject._22);
     const bool success = useFsr ? fsrBackend.Evaluate(frame) : backend.Evaluate(frame);
+    if (traceEvaluations && useFsr)
+    {
+        --traceEvaluations;
+        static Fvector tracePosition, traceDirection;
+        // Camera change since the previous traced evaluation, as screen pixels of rotation at the render resolution.
+        const float turn = acosf(clampr(traceDirection.dotproduct(Device.vCameraDirection), -1.0f, 1.0f)) *
+            RenderHeight() / frame.verticalFov;
+        Msg("[FSR3 trace] frame=%u reset=%u ok=%u jitter=(%.4f,%.4f) dt=%.2fms cam_move=%.6fm cam_turn=%.4fpx view_same=%u",
+            frame.frame, unsigned(fsrBackend.LastReset()), unsigned(success), frame.jitter.x, frame.jitter.y,
+            frame.deltaMilliseconds, tracePosition.distance_to(Device.vCameraPosition), turn,
+            unsigned(!memcmp(&Device.mView, &Device.mView_prev, sizeof(Fmatrix))));
+        tracePosition = Device.vCameraPosition;
+        traceDirection = Device.vCameraDirection;
+    }
     if (success && !reportedEvaluation)
     {
         SetRendererError(nullptr);

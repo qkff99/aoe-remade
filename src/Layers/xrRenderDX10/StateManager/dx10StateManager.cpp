@@ -5,6 +5,7 @@
 #include "dx10StateManager.h"
 
 #include "../dx10StateUtils.h"
+#include "../../xrRender/xrRender_console.h"
 #include "dx10StateCache.h"
 
 #undef StateManager
@@ -28,8 +29,27 @@ dx10StateManager::~dx10StateManager()
 }
 
 //	Set all states to default
+#if defined(USE_DX11) && RENDER == R_R4
+bool dx10StateManager::TemporalHistorySafe()
+{
+    ValidateBDesc();
+    return !m_BDesc.AlphaToCoverageEnable && !m_BDesc.RenderTarget[0].BlendEnable;
+}
+
+bool dx10StateManager::TemporalBlended()
+{
+    ValidateBDesc();
+    return ps_r_upscaler_alpha_motion && !m_BDesc.AlphaToCoverageEnable && m_BDesc.RenderTarget[0].BlendEnable;
+}
+#endif
+
 void dx10StateManager::Reset()
 {
+#if defined(USE_DX11) && RENDER == R_R4
+    m_temporal_target = false;
+    m_temporal_legacy_blocked = false;
+    m_temporal_motion_write = true;
+#endif
 	UnmapConstants();
 
 	m_pRState = 0;
@@ -216,7 +236,34 @@ void dx10StateManager::Apply()
 
 		static const FLOAT BlendFactor[4] = {0.000f, 0.000f, 0.000f, 0.000f};
 
-		RenderDeviceContext()->OMSetBlendState(m_pBlendState, BlendFactor, m_uiSampleMask);
+        auto* effective_blend = m_pBlendState;
+#if defined(USE_DX11) && RENDER == R_R4
+        if (m_temporal_target)
+        {
+            D3D_BLEND_DESC description;
+            if (m_pBlendState) m_pBlendState->GetDesc(&description);
+            else dx10StateUtils::ResetDescription(description);
+            if (!description.IndependentBlendEnable)
+                for (unsigned i = 1; i < 8; ++i) description.RenderTarget[i] = description.RenderTarget[0];
+            description.IndependentBlendEnable = TRUE;
+            // Blended draws weight motion/reactive by their alpha (the pixel shader writes it to .w).
+            const bool blended = ps_r_upscaler_alpha_motion && !description.AlphaToCoverageEnable &&
+                                 description.RenderTarget[0].BlendEnable;
+            auto& motion = description.RenderTarget[4];
+            motion.BlendEnable = blended;
+            motion.SrcBlend = D3D11_BLEND_SRC_ALPHA;
+            motion.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+            motion.BlendOp = D3D11_BLEND_OP_ADD;
+            motion.SrcBlendAlpha = D3D11_BLEND_ONE;
+            motion.DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+            motion.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+            description.RenderTarget[4].RenderTargetWriteMask =
+                m_temporal_motion_write ? D3D11_COLOR_WRITE_ENABLE_ALL : 0;
+            if (m_temporal_legacy_blocked) description.RenderTarget[3].RenderTargetWriteMask = 0;
+            effective_blend = BSManager.GetState(description);
+        }
+#endif
+		RenderDeviceContext()->OMSetBlendState(effective_blend, BlendFactor, m_uiSampleMask);
 		m_bBSNeedApply = false;
 	}
 }

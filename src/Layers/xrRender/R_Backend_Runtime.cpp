@@ -81,6 +81,9 @@ void CBackend::OnFrameBegin()
 void CBackend::Invalidate()
 {
 #if defined(USE_DX11) && RENDER == R_R4
+    temporal_bound_vertex = nullptr;
+    temporal_bound_pixel = nullptr;
+    pRT[4] = nullptr;
     skeleton_snapshot = nullptr;
     recording_object = nullptr;
 #endif

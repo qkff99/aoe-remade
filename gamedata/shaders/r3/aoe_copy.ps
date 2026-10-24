@@ -1,0 +1,10 @@
+Texture2D<float4> aoe_image;
+SamplerState aoe_sampler;
+cbuffer AOE_Encode : register(b0) { float4 aoe_encode; };
+
+float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
+{
+    float4 color = aoe_image.SampleLevel(aoe_sampler, uv, 0);
+    color.rgb = pow(max(color.rgb, 0), aoe_encode.xxx);
+    return color;
+}

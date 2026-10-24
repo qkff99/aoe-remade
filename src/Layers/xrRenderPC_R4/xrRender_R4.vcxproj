@@ -897,6 +897,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Dlss\DlssIntegration.cpp" />
+    <ClCompile Include="Dlss\TemporalShaders.cpp" />
+    <ClInclude Include="Dlss\TemporalShaders.h" />
+    <ClInclude Include="Dlss\TemporalShaderSource.h" />
     <ClCompile Include="Dlss\Fsr3D3D11.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ExceptionHandling>Sync</ExceptionHandling>
