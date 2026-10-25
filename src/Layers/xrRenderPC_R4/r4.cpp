@@ -22,6 +22,12 @@
 
 CRender RImplementation;
 
+u32 RenderVendor()
+{
+	static const u32 vendor = strstr(Core.Params, "-vendor_nv") ? 0x10DE : strstr(Core.Params, "-vendor_amd") ? 0x1002 : HW.Caps.id_vendor;
+	return vendor;
+}
+
 //////////////////////////////////////////////////////////////////////////
 class CGlow : public IRender_Glow
 {
@@ -303,11 +309,12 @@ void CRender::create()
 	if (o.HW_smap)
 	{
 		//	For ATI it's much faster on DX10 to use D32F format
-		if (HW.Caps.id_vendor == 0x1002)
+		if (RenderVendor() == 0x1002)
 			o.HW_smap_FORMAT = D3DFMT_D32F_LOCKABLE;
 		else
 			o.HW_smap_FORMAT = D3DFMT_D24X8;
 		Msg("* HWDST/PCF supported and used");
+		if (RenderVendor() != HW.Caps.id_vendor) Msg("! Render vendor forced to %04X (GPU %04X)", RenderVendor(), HW.Caps.id_vendor);
 	}
 
 	//	DX10 disabled
@@ -401,7 +408,7 @@ void CRender::create()
 	o.hbao_vectorized = false;
 	if (o.ssao_hbao)
 	{
-		if (HW.Caps.id_vendor == 0x1002)
+		if (RenderVendor() == 0x1002)
 			o.hbao_vectorized = true;
 		o.ssao_opt_data = true;
 	}
@@ -463,7 +470,7 @@ void CRender::create()
 		o.dx10_minmax_sm = MMSM_OFF;
 
 		//	AMD device
-		if (HW.Caps.id_vendor == 0x1002)
+		if (RenderVendor() == 0x1002)
 		{
 			if (ps_r_sun_quality >= 3)
 				o.dx10_minmax_sm = MMSM_AUTO;
@@ -476,7 +483,7 @@ void CRender::create()
 		}
 
 		//	NVidia boards
-		if (HW.Caps.id_vendor == 0x10DE)
+		if (RenderVendor() == 0x10DE)
 		{
 			if ((ps_r_sun_shafts >= 2))
 			{
@@ -1908,14 +1915,14 @@ HRESULT CRender::shader_compile(
 	}
 
 	//Useful shit. 
-	if (HW.Caps.id_vendor == 0x1002) //AMD hardware
+	if (RenderVendor() == 0x1002) //AMD hardware
 	{
 		defines[def_it].Name = "INT_RENDER_AMD";
 		defines[def_it].Definition = "1";
 		def_it++;
 	}
 
-	if (HW.Caps.id_vendor == 0x10DE) //NVidia hardware
+	if (RenderVendor() == 0x10DE) //NVidia hardware
 	{
 		defines[def_it].Name = "INT_RENDER_NVIDIA";
 		defines[def_it].Definition = "1";

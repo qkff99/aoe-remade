@@ -23,9 +23,12 @@ struct ReceiverQueries
     };
     static constexpr u32 capacity = 3;
     Query queries[capacity];
-    u32 first = 0, pending = 0, result_frame = 0;
+    u32 first = 0, pending = 0, result_frame = 0, hidden_streak = 0;
     u64 result_generation = 0;
     bool hidden = false;
+    // A receiver count near zero reads zero and non-zero on alternate frames (camera position noise,
+    // sub-pixel changes). Reject the light only after this many consecutive empty answers.
+    static constexpr u32 hidden_confirmations = 16;
 
     Query* Available()
     {
@@ -53,6 +56,8 @@ struct ReceiverQueries
             --pending;
             first = (first + 1) % capacity;
             hidden = result == S_OK && samples == 0;
+            if (query.generation != result_generation) hidden_streak = 0;
+            hidden_streak = hidden ? hidden_streak + 1 : 0;
             result_frame = query.frame;
             result_generation = query.generation;
             ready += result == S_OK;
@@ -60,7 +65,7 @@ struct ReceiverQueries
         }
         // A pending test does not revoke the last completed answer. A changed
         // camera/settings generation or a new visible/error answer does.
-        return hidden && result_generation == generation;
+        return hidden && hidden_streak >= hidden_confirmations && result_generation == generation;
     }
 };
 

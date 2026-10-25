@@ -489,4 +489,6 @@ private:
 	FS_FileSet m_file_set;
 };
 
+// GPU vendor used for vendor-specific render paths. -vendor_nv / -vendor_amd force a path on any GPU (testing).
+u32 RenderVendor();
 extern CRender RImplementation;

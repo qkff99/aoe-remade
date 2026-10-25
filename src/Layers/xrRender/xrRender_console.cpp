@@ -8,6 +8,7 @@
 #if defined(USE_DX11) && RENDER == R_R4
 #include "../xrRenderPC_R4/LocalLightDebug.h"
 #include "../xrRenderPC_R4/Dlss/TemporalShaders.h"
+#include "../../xrEngine/CustomHUD.h"
 #endif
 
 u32 ps_Preset = 2;
@@ -1110,6 +1111,17 @@ public:
     void Execute(LPCSTR) override { LocalLightDebug::RequestDump(); }
 };
 
+class CCC_HudDump : public IConsole_Command
+{
+public:
+    CCC_HudDump(LPCSTR name) : IConsole_Command(name) { bEmptyArgsHandled = TRUE; }
+    void Execute(LPCSTR) override
+    {
+        g_hud_trace_armed = true;
+        Msg("[HUD] Dump requested for the next main-view frame.");
+    }
+};
+
 class CCC_UpscalerMotionDump : public IConsole_Command
 {
 public:
@@ -1624,6 +1636,8 @@ void xrRender_initconsole()
     CMD4(CCC_Integer, "r4_light_debug", &LocalLightDebug::show, 0, 1);
     CMD1(CCC_LightDebugDump, "r4_light_debug_dump");
     CMD1(CCC_UpscalerMotionDump, "r4_upscaler_motion_dump");
+    CMD1(CCC_HudDump, "r4_hud_dump");
+    CMD4(CCC_Integer, "r4_hud_watch", &g_hud_watch, 0, 1);
 #endif
 #endif
 	CMD3(CCC_Mask,		"r2_gi",				&ps_r2_ls_flags,			R2FLAG_GI);

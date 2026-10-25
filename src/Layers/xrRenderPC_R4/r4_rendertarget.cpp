@@ -1031,7 +1031,7 @@ CRenderTarget::CRenderTarget()
 			h = dlss::RenderHeight();
 		}
 
-		D3DFORMAT fmt = HW.Caps.id_vendor == 0x10DE ? D3DFMT_R32F : D3DFMT_R16F;
+		D3DFORMAT fmt = RenderVendor() == 0x10DE ? D3DFMT_R32F : D3DFMT_R16F;
 		rt_half_depth.create(r2_RT_half_depth, w, h, fmt);
 
 		s_ssao.create(b_ssao, "r2\\ssao");
