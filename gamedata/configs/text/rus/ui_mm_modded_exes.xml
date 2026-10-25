@@ -2,10 +2,10 @@
 
 <string_table>
 	<string id="ui_mm_title_modded_exes">
-		<text>Modded Exes</text>
+		<text>AOE-Remade</text>
 	</string>
 	<string id="ui_mm_menu_modded_exes">
-		<text>Modded Exes</text>
+		<text>AOE-Remade</text>
 	</string>
 
 	<string id="ui_mm_video_basic_monitor">

@@ -41,7 +41,7 @@ _G.ipairs = function(t, ...)
 end
 
 _G.printf_me = function(s, ...)
-	printf("[Modded Exes] " .. s, ...)
+	printf("[AOE-Remade] " .. s, ...)
 end
 
 _G.convert_class_name = function(obj)

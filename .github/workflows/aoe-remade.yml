@@ -1,0 +1,120 @@
+name: AOE-Remade
+
+# Builds DX11 and DX11 Optick (ProfiledDX11) executables and packs gamedata into one archive.
+# Push to AOE-Remade or run manually: the archive is uploaded as a workflow artifact.
+# Push a tag named aoe-*: the same archive is also published as a GitHub release.
+on:
+  push:
+    branches: [ "AOE-Remade" ]
+    tags: [ "aoe-*" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  SOLUTION_FILE_PATH: src/engine-vs2022.sln
+  # Keeps the upstream file name so it replaces the stock Modded Exes db instead of loading beside it
+  # ("00_a..." would sort before it and be overridden).
+  PACK_GAMEDATA_NAME: 00_modded_exes_gamedata.db0
+
+jobs:
+  pack_gamedata:
+    name: pack-gamedata
+    runs-on: windows-latest
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Pack gamedata
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force ./compressor/gamedata | Out-Null
+        Copy-Item -Path ./gamedata/* -Destination ./compressor/gamedata -Recurse -Force
+        Set-Location ./compressor
+        # Same command as "! compress_gamedata.cmd".
+        ./xrCompress.exe gamedata -ltx build_patch.ltx -pack -strong -1024 -db | Select-Object -Last 3
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Rename-Item gamedata.db0 $env:PACK_GAMEDATA_NAME
+
+    - name: Upload gamedata
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: ${{ env.PACK_GAMEDATA_NAME }}
+        path: ./compressor/${{ env.PACK_GAMEDATA_NAME }}
+        if-no-files-found: error
+        retention-days: 1
+
+  build:
+    name: build-${{ matrix.buildconf }}
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        # DX11 -> AnomalyDX11.exe, ProfiledDX11 -> AnomalyDX11Optick.exe
+        buildconf: [ "DX11", "ProfiledDX11" ]
+    steps:
+    - name: Configure Pagefile
+      uses: al-cheb/configure-pagefile-action@v1.3
+      with:
+        minimum-size: 8GB
+        maximum-size: 8GB
+        disk-root: "C:"
+
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: setup-msbuild
+      uses: microsoft/setup-msbuild@v1.3.1
+      with:
+        msbuild-architecture: "x64"
+
+    - name: Build ${{ matrix.buildconf }}
+      run: msbuild /p:Configuration=${{ matrix.buildconf }} /p:Platform=x64 ${{ env.SOLUTION_FILE_PATH }}
+
+    - name: Upload exe
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: ${{ matrix.buildconf }}_exe
+        path: ./_build/_game/bin_dbg/*.exe
+        if-no-files-found: error
+        retention-days: 1
+
+  package:
+    needs: [ pack_gamedata, build ]
+    name: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4.1.8
+
+    - name: Make archive
+      id: archive
+      run: |
+        NAME="AOE-Remade_$(date +'%Y.%-m.%-d')_${GITHUB_SHA::7}"
+        mkdir -p release/bin release/db/mods
+        mv DX11_exe/*.exe ProfiledDX11_exe/*.exe release/bin
+        mv ${{ env.PACK_GAMEDATA_NAME }}/*.db0 release/db/mods
+        (cd release && zip -r "../$NAME.zip" ./*)
+        echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+    - name: Upload archive
+      uses: actions/upload-artifact@v4.6.0
+      with:
+        name: ${{ steps.archive.outputs.name }}
+        path: ${{ steps.archive.outputs.name }}.zip
+        if-no-files-found: error
+        retention-days: 14
+
+    - name: Publish release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2.3.2
+      with:
+        files: ${{ steps.archive.outputs.name }}.zip
+        generate_release_notes: true
+        token: ${{ secrets.GITHUB_TOKEN }}

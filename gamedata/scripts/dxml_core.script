@@ -9,7 +9,7 @@ local table_remove 	= table.remove
 local table_sort 	= table.sort
 
 -- DXML MAIN
-assert(AddScriptCallback, "Cannot add callbacks to the game, reinstall Anomaly 1.5.2 and Modded Exes")
+assert(AddScriptCallback, "Cannot add callbacks to the game, reinstall Anomaly 1.5.2 and AOE-Remade")
 AddScriptCallback("on_specific_character_dialog_list")
 AddScriptCallback("on_specific_character_init")
 AddScriptCallback("on_xml_read")

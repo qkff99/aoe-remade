@@ -1,6 +1,6 @@
 function init()
     exec_console_cmd("r__fakescope " .. 1)
-    assert(add_scope_radii, "add_scope_radii function doesn't exist for this engine, reinstall modded exes")
+    assert(add_scope_radii, "add_scope_radii function doesn't exist for this engine, reinstall AOE-Remade")
     if scopeRadii and scopeRadii.scopeRadii then
         for key, val in pairs(scopeRadii.scopeRadii) do
             add_scope_radii(key, val)

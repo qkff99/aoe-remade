@@ -135,7 +135,7 @@ int get_modded_exes_version() {
 }
 
 LPCSTR get_modded_exes_name() {
-	shared_str result = "Modded Exes MT-TEST";
+	shared_str result = "AOE-Remade";
 	return result.c_str();
 }
 
