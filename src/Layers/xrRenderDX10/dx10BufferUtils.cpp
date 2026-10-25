@@ -142,8 +142,9 @@ namespace dx10BufferUtils
 			descOut.Format = ConvertVertexFormat((D3DDECLTYPE)descIn.Type);
 			descOut.InputSlot = descIn.Stream;
 			descOut.AlignedByteOffset = descIn.Offset;
-			descOut.InputSlotClass = D3D_INPUT_PER_VERTEX_DATA;
-			descOut.InstanceDataStepRate = 0;
+			// Only the detail manager declares a second stream; it carries per-instance data.
+			descOut.InputSlotClass = descIn.Stream ? D3D_INPUT_PER_INSTANCE_DATA : D3D_INPUT_PER_VERTEX_DATA;
+			descOut.InstanceDataStepRate = descIn.Stream ? 1 : 0;
 		}
 
 		ZeroMemory(&declOut[iDeclSize], sizeof(declOut[iDeclSize]));

@@ -77,11 +77,33 @@ SCS::~SCS()
 
 ///////////////////////////////////////////////////////////////////////
 //	SInputSignature
+// True when the DXBC input signature declares exactly one element, POSITION.
+static bool SignatureIsPositionOnly(ID3DBlob* blob)
+{
+	const u8* data = static_cast<const u8*>(blob->GetBufferPointer());
+	const size_t size = blob->GetBufferSize();
+	if (size < 32 || memcmp(data, "DXBC", 4)) return false;
+	const u32 chunks = *reinterpret_cast<const u32*>(data + 28);
+	for (u32 i = 0; i < chunks && 32 + size_t(i + 1) * 4 <= size; ++i)
+	{
+		const u32 offset = *reinterpret_cast<const u32*>(data + 32 + i * 4);
+		if (size_t(offset) + 16 > size || memcmp(data + offset, "ISG", 3) || (data[offset + 3] != 'N' && data[offset + 3] != '1'))
+			continue;
+		const u8* chunk = data + offset + 8; // name offsets are relative to the chunk body
+		const u32 stride = data[offset + 3] == '1' ? 32 : 24;
+		if (*reinterpret_cast<const u32*>(chunk) != 1 || size_t(offset) + 16 + stride > size) return false;
+		const u32 name = *reinterpret_cast<const u32*>(chunk + 8 + (stride == 32 ? 4 : 0));
+		return size_t(offset) + 8 + name + 9 <= size && !memcmp(chunk + name, "POSITION", 9);
+	}
+	return false;
+}
+
 SInputSignature::SInputSignature(ID3DBlob* pBlob)
 {
 	VERIFY(pBlob);
 	signature = pBlob;
 	signature->AddRef();
+	position_only = SignatureIsPositionOnly(pBlob);
 };
 
 SInputSignature::~SInputSignature()

@@ -305,6 +305,7 @@ void CDetailManager::ReleaseRenderCache(Slot& slot)
             m_render_cache_bytes -= u32(items.cached_constants.capacity() * sizeof(Fvector4));
             items.cached_constants.clear_and_free();
             items.cache_state = SlotRenderItems::Invalid;
+            ++items.revision;
         }
 }
 
@@ -460,8 +461,7 @@ void CDetailManager::UpdateVisibleM()
                         u32 written[3]{};
                         bool identical[3];
                         for (u32 wave = 0; wave < 3; ++wave)
-                            identical[wave] = !S.hidden && sp.r_items[wave].cache_state == SlotRenderItems::Ready &&
-                                sp.r_items[wave].cached_constants.size() == sp.r_items[wave].size() * 5;
+                            identical[wave] = !S.hidden && sp.r_items[wave].Unchanged();
 #else
                         for (auto& items : sp.r_items) items.clear_not_free();
 #endif
@@ -546,7 +546,12 @@ void CDetailManager::UpdateVisibleM()
                             auto& items = sp.r_items[wave];
                             identical[wave] = identical[wave] && written[wave] == items.size();
                             items.resize(written[wave]);
-                            if (!identical[wave]) items.cache_state = SlotRenderItems::Invalid;
+                            items.slot_distance = dist_sq;
+                            if (!identical[wave])
+                            {
+                                items.cache_state = SlotRenderItems::Invalid;
+                                ++items.revision;
+                            }
                         }
 #endif
 					}

@@ -327,7 +327,8 @@ IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV, 
 #endif
 	SRVSManager.Apply();
 	ApplyRTandZB();
-	ApplyVertexLayout();
+	if (!ApplyVertexLayout())
+		return;
 	StateManager.Apply();
 	//	State manager may alter constants
 	constants.flush();
@@ -338,6 +339,33 @@ IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV, 
 
 	PGO(Msg("PGO:DIP:%dv/%df",countV,PC));
 }
+
+#if defined(USE_DX11) && RENDER == R_R4
+// Same as Render(baseV, ...) but draws instanceCount copies, taking per-instance data from vertex stream 1.
+IC void CBackend::RenderInstanced(D3DPRIMITIVETYPE T, u32 instanceCount, u32 baseV, u32 startV, u32 countV, u32 startI, u32 PC, u32 startInstance)
+{
+	PROF_EVENT("RCache.Render_instanced");
+	D3D_PRIMITIVE_TOPOLOGY Topology = TranslateTopology(T);
+	u32 iIndexCount = GetIndexCount(T, PC);
+	if (hs != 0 || ds != 0)
+	{
+		R_ASSERT(Topology == D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		Topology = D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
+	}
+	stat.calls++;
+	stat.verts += countV * instanceCount;
+	stat.polys += PC * instanceCount;
+	ApplyPrimitieTopology(Topology);
+	if (!aoe_temporal::Bind(*this, baseV, startI, iIndexCount, true)) aoe_temporal::Restore(*this);
+	SRVSManager.Apply();
+	ApplyRTandZB();
+	if (!ApplyVertexLayout())
+		return;
+	StateManager.Apply();
+	constants.flush();
+	RenderDeviceContext()->DrawIndexedInstanced(iIndexCount, instanceCount, startI, baseV, startInstance);
+}
+#endif
 
 IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 startV, u32 PC)
 {
@@ -362,7 +390,8 @@ IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 startV, u32 PC)
 #endif
 	SRVSManager.Apply();
 	ApplyRTandZB();
-	ApplyVertexLayout();
+	if (!ApplyVertexLayout())
+		return;
 	StateManager.Apply();
 	//	State manager may alter constants
 	constants.flush();
@@ -469,7 +498,7 @@ ICF void CBackend::set_CullMode(u32 _mode)
 	//if (cull_mode		!= _mode)		{ cull_mode = _mode;			CHK_DX(HW.pDevice->SetRenderState	( D3DRS_CULLMODE,			_mode				)); }
 }
 
-IC void CBackend::ApplyVertexLayout()
+IC bool CBackend::ApplyVertexLayout()
 {
 	PROF_EVENT("CBackend::ApplyVertexLayout");
 	VERIFY(vs);
@@ -479,12 +508,14 @@ IC void CBackend::ApplyVertexLayout()
     if (RenderContextId())
     {
         auto* layout = ContextInputLayout(decl, m_pInputSignature);
+        if (!layout)
+            return false;
         if (m_pInputLayout != layout)
         {
             m_pInputLayout = layout;
             RenderDeviceContext()->IASetInputLayout(layout);
         }
-        return;
+        return true;
     }
 #endif
 
@@ -513,17 +544,20 @@ IC void CBackend::ApplyVertexLayout()
 		m_pInputLayout = it->second;
 		RenderDeviceContext()->IASetInputLayout(m_pInputLayout);
 	}
+	return true;
 }
 
 ICF void CBackend::set_VS(ref_vs& _vs)
 {
 	m_pInputSignature = _vs->signature->signature;
+	vs_position_only = _vs->signature->position_only;
 	set_VS(_vs->vs, _vs->cName.c_str());
 }
 
 ICF void CBackend::set_VS(SVS* _vs)
 {
 	m_pInputSignature = _vs->signature->signature;
+	vs_position_only = _vs->signature->position_only;
 	set_VS(_vs->vs, _vs->cName.c_str());
 }
 

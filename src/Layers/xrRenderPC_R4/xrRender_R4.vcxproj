@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="ProfiledDX11|x64">
@@ -621,6 +621,9 @@
     <ClInclude Include="LocalLightShadows.h" />
     <ClInclude Include="LocalLightDepthCache.h" />
     <ClInclude Include="SunShadows.h" />
+    <ClInclude Include="DetailInstancing.h" />
+    <ClInclude Include="DetailGather.h" />
+    <ClInclude Include="DetailGatherCodec.h" />
     <ClInclude Include="LocalShadowVisibility.h" />
     <ClInclude Include="RenderContext.h" />
     <ClInclude Include="..\xrRender\RenderContext.h" />
@@ -861,6 +864,12 @@
       <ExceptionHandling>Sync</ExceptionHandling>
     </ClCompile>
     <ClCompile Include="SunShadows.cpp">
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
+    <ClCompile Include="DetailInstancing.cpp">
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
+    <ClCompile Include="DetailGather.cpp">
       <ExceptionHandling>Sync</ExceptionHandling>
     </ClCompile>
     <ClCompile Include="RenderContext.cpp">

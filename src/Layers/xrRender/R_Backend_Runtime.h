@@ -177,7 +177,11 @@ IC void CBackend::set_Element(ShaderElement* S, u32 pass)
 	PROF_EVENT("CBackend::set_Element");
     if (!S->passes[pass])
         return;
-	SPass& P = *(S->passes[pass]);
+	set_Pass(*(S->passes[pass]));
+}
+
+IC void CBackend::set_Pass(SPass& P)
+{
 	set_States(P.state);
 	set_PS(P.ps);
 	set_VS(P.vs);

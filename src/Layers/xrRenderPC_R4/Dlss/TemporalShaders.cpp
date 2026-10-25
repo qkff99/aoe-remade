@@ -319,7 +319,8 @@ bool Prepare(Program &program)
         // Other contracts keep the general capture path.
         const std::set<std::string> known{"m_WVP",   "m_WV",      "m_VP",   "m_V",     "m_P",       "m_W",
                                           "m_xform", "m_xform_v", "consts", "c_scale", "c_bias",    "wind",
-                                          "wave",    "c_sun",     "dir2D",  "array",   "dt_params", "L_material"};
+                                          "wave",    "c_sun",     "dir2D",  "array",   "dt_params", "L_material",
+                                          "aoe_detail_fade"};
         bool supported = true;
         for (const auto &variable : variables)
         {

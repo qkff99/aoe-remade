@@ -242,7 +242,13 @@ void Fvisual::Render(float)
 {
 	PROF_EVENT("Fvisual::Render");
 #if (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4)
-	if (m_fast && RCache.RenderPhase(RImplementation.phase) == CRender::PHASE_SMAP && !RCache.is_TessEnabled())
+#if (RENDER==R_R3) || (RENDER==R_R4)
+	// The fast path stores positions only; an alpha-tested shadow shader also reads texture coordinates, so it needs the full geometry.
+	const bool fast_geometry_fits = RCache.vs_position_only;
+#else
+	const bool fast_geometry_fits = true;
+#endif
+	if (m_fast && fast_geometry_fits && RCache.RenderPhase(RImplementation.phase) == CRender::PHASE_SMAP && !RCache.is_TessEnabled())
 	{
 		RCache.set_Geometry(m_fast->rm_geom);
 		RCache.Render(D3DPT_TRIANGLELIST, m_fast->vBase, 0, m_fast->vCount, m_fast->iBase, m_fast->dwPrimitives);

@@ -183,19 +183,22 @@ public:
 };
 
 // Mutated by main only after the normal Lua owner has joined. Ordinary frames
-// never wait for extra GC. This is a one-shot OOM escape for a truly starved
-// cycle, reset only when that cycle completes or the VM changes.
+// never wait for extra GC. This is a one-shot OOM escape for a starved cycle,
+// reset only when that cycle completes or the VM changes. Starved means the cycle
+// has been open for many frames while the heap kept growing; taking a step every
+// frame is not progress (an inactive window gets one step per frame and was never
+// rescued, so the heap grew until the low-address pool ran out).
 class LuaGCEmergencyPolicy
 {
 	const void* vm = nullptr;
 	std::uint32_t cycles = 0;
 	std::size_t reference_heap = 0;
-	unsigned frames_without_progress = 0;
+	unsigned cycle_frames = 0;
 	unsigned emergency_count = 0;
 	bool emergency_attempted = false;
 public:
 	void Reset() { *this = LuaGCEmergencyPolicy(); }
-	unsigned FramesWithoutProgress() const { return frames_without_progress; }
+	unsigned CycleFrames() const { return cycle_frames; }
 	unsigned EmergencyCount() const { return emergency_count; }
 	std::size_t GrowthBytes(const LuaGCInfo& info) const
 	{
@@ -213,10 +216,11 @@ public:
 			reference_heap = info.heap_bytes;
 			emergency_count = total_emergencies;
 		}
-		frames_without_progress = steps ? 0 : frames_without_progress + 1;
+		(void)steps;
+		if (cycle_frames != ~0u) ++cycle_frames;
 		const std::size_t mib = 1024u * 1024u;
 		const std::size_t threshold = reference_heap / 2 > 64u * mib ? reference_heap / 2 : 64u * mib;
-		if (emergency_attempted || frames_without_progress < 120 || GrowthBytes(info) < threshold)
+		if (emergency_attempted || cycle_frames < 120 || GrowthBytes(info) < threshold)
 			return false;
 		emergency_attempted = true;
 		++emergency_count;

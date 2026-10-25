@@ -336,6 +336,10 @@ int ps_r4_smapvis = 1;
 int ps_r4_static_light_cache = 2;
 int ps_r4_mt_sun_shadows = 1;
 int ps_r4_mt_rain_shadows = 1;
+// Grass drawn with hardware instancing; the engine builds an instanced twin of the active detail vertex shader.
+int ps_r4_detail_instancing = 2;
+// Grass thinning for r4_detail_instancing 2: from `x` metres the kept share falls linearly to `z` at `y` metres (z 1 = off).
+Fvector3 ps_r4_detail_thin = {25.f, 100.f, 0.2f};
 
 // HDR10 parameters
 float ps_r4_hdr10_whitepoint_nits = 400.0f; // r4-only, default = 400 nits
@@ -1366,7 +1370,8 @@ void xrRender_initconsole()
 	//.	CMD4(CCC_Float,		"r__geometry_lod_pow",	&ps_r__LOD_Power,			0,		2		);
 
 	//.	CMD4(CCC_Float,		"r__detail_density",	&ps_r__Detail_density,		.05f,	0.99f	);
-	CMD4(CCC_Float, "r__detail_density", &ps_current_detail_density/*&ps_r__Detail_density*/, 0.04f/*.2f*/, 1.f);
+	// 0.2 is the densest spacing that still looks as dense as 0.04 with far fewer instances: the lower bound is fixed.
+	CMD4(CCC_Float, "r__detail_density", &ps_current_detail_density/*&ps_r__Detail_density*/, 0.2f, 1.f);
 	//AVO: extended from 0.2 to 0.04 and replaced variable
 	CMD4(CCC_Float, "r__detail_height", &ps_current_detail_height, 0.5f, 2.0f);
 
@@ -1519,6 +1524,8 @@ void xrRender_initconsole()
     CMD4(CCC_Integer, "r4_static_light_cache", &ps_r4_static_light_cache, 0, 2);
     CMD4(CCC_Integer, "r4_mt_sun_shadows", &ps_r4_mt_sun_shadows, 0, 1);
     CMD4(CCC_Integer, "r4_mt_rain_shadows", &ps_r4_mt_rain_shadows, 0, 1);
+    CMD4(CCC_Integer, "r4_detail_instancing", &ps_r4_detail_instancing, 0, 2);
+    CMD4(CCC_Vector3, "r4_detail_thin", &ps_r4_detail_thin, Fvector3().set(0.f, 0.f, 0.05f), Fvector3().set(1000.f, 1000.f, 1.f));
 
     CMD4(CCC_Float,   "r4_hdr10_whitepoint_nits", &ps_r4_hdr10_whitepoint_nits,  10.0f, 10000.0f);
     CMD4(CCC_Float,   "r4_hdr10_ui_nits", 		  &ps_r4_hdr10_ui_nits, 	     10.0f, 10000.0f);

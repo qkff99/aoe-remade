@@ -12,6 +12,10 @@
 #endif
 
 #include "../xrRenderDX10/dx10BufferUtils.h"
+#if RENDER == R_R4
+#include "../xrRenderPC_R4/DetailInstancing.h"
+#include "../xrRenderPC_R4/DetailGather.h"
+#endif
 
 const int quant = 16384;
 const int c_hdr = 10;
@@ -23,6 +27,21 @@ static D3DVERTEXELEMENT9 dwDecl[] =
 	{0, 12, D3DDECLTYPE_SHORT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0}, // uv
 	D3DDECL_END()
 };
+
+#if RENDER == R_R4
+// Single mesh copy plus per-instance stream 1 (detail_instancing::Instance).
+static D3DVERTEXELEMENT9 dwDeclInstanced[] =
+{
+	{0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+	{0, 12, D3DDECLTYPE_SHORT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+	{1, 0, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},
+	{1, 16, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 2},
+	{1, 32, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 3},
+	{1, 48, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 4},
+	{1, 64, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 5},
+	D3DDECL_END()
+};
+#endif
 
 #pragma pack(push,1)
 struct vertHW
@@ -150,8 +169,83 @@ void CDetailManager::hw_Load_Geom()
 	hw_Geom.create(dwDecl, hw_VB, hw_IB);
 }
 
+#if RENDER == R_R4
+void CDetailManager::hw_Load_Instanced()
+{
+	u32 dwVerts = 0, dwIndices = 0;
+	hw_inst_vertex_offset.resize(objects.size());
+	hw_inst_index_offset.resize(objects.size());
+	for (u32 o = 0; o < objects.size(); o++)
+	{
+		hw_inst_vertex_offset[o] = dwVerts;
+		hw_inst_index_offset[o] = dwIndices;
+		dwVerts += objects[o]->number_vertices;
+		dwIndices += objects[o]->number_indices;
+	}
+	if (!dwVerts || !dwIndices)
+		return;
+	vertHW* pV = xr_alloc<vertHW>(dwVerts);
+	u16* pI = xr_alloc<u16>(dwIndices);
+	vertHW* vertex = pV;
+	u16* index = pI;
+	for (u32 o = 0; o < objects.size(); o++)
+	{
+		const CDetail& D = *objects[o];
+		for (u32 v = 0; v < D.number_vertices; v++)
+		{
+			const Fvector& vP = D.vertices[v].P;
+			vertex->x = vP.x;
+			vertex->y = vP.y;
+			vertex->z = vP.z;
+			vertex->u = QC(D.vertices[v].u);
+			vertex->v = QC(D.vertices[v].v);
+			vertex->t = QC(vP.y / (D.bv_bb.max.y - D.bv_bb.min.y));
+			vertex->mid = 0; // the instance record replaces the constant array slot
+			vertex++;
+		}
+		for (u32 i = 0; i < u32(D.number_indices); i++)
+			*index++ = u16(D.indices[i]);
+	}
+	R_CHK(dx10BufferUtils::CreateVertexBuffer(&hw_inst_VB, pV, dwVerts * sizeof(vertHW)));
+	HW.stats_manager.increment_stats_vb(hw_inst_VB);
+	R_CHK(dx10BufferUtils::CreateIndexBuffer(&hw_inst_IB, pI, dwIndices * 2));
+	HW.stats_manager.increment_stats_ib(hw_inst_IB);
+	xr_free(pV);
+	xr_free(pI);
+	hw_Geom_inst.create(dwDeclInstanced, hw_inst_VB, hw_inst_IB);
+	hw_EnsureInstanceCapacity(1u << 16, false);
+	hw_instance_frame = u32(-1);
+	Msg("* [DETAILS] Instancing: %d v, %d p, stream %d bytes per instance", dwVerts, dwIndices / 3,
+		int(sizeof(detail_instancing::Instance)));
+}
+
+void CDetailManager::hw_Unload_Instanced()
+{
+	hw_instanced_passes.clear();
+	hw_Geom_inst.destroy();
+	if (hw_inst_VB) HW.stats_manager.decrement_stats_vb(hw_inst_VB);
+	if (hw_inst_IB) HW.stats_manager.decrement_stats_ib(hw_inst_IB);
+	xr_delete(hw_gatherer);
+	hw_instance_gpu = false;
+	if (hw_instanceVB) HW.stats_manager.decrement_stats_vb(hw_instanceVB);
+	_RELEASE(hw_inst_VB);
+	_RELEASE(hw_inst_IB);
+	_RELEASE(hw_instanceVB);
+	hw_instance_capacity = 0;
+	hw_instance_frame = u32(-1);
+	for (u32 i = 0; i < 3; ++i)
+	{
+		hw_inst_base[i].clear();
+		hw_inst_count[i].clear();
+	}
+}
+#endif
+
 void CDetailManager::hw_Unload()
 {
+#if RENDER == R_R4
+	hw_Unload_Instanced();
+#endif
 	// Destroy VS/VB/IB
 	hw_Geom.destroy();
 	HW.stats_manager.decrement_stats_vb(hw_VB);

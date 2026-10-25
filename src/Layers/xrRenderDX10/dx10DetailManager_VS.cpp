@@ -7,6 +7,173 @@
 #include "../xrRenderDX10/dx10BufferUtils.h"
 #if RENDER == R_R4
 #include "../xrRenderPC_R4/RenderContext.h"
+#include "../xrRenderPC_R4/DetailInstancing.h"
+#include "../xrRenderPC_R4/DetailGather.h"
+#include "../xrRender/dxRenderDeviceRender.h"
+#include <ppl.h>
+#include <vector>
+#endif
+
+#if RENDER == R_R4 && XRCORE_PROFILER == PROFILER_OPTICK
+namespace
+{
+// GPU time of the main-pass grass, Optick builds only. Stamps: 0 before the instance fill, 1 after it (stream gather/copies),
+// 2 after the draws. Results arrive a few frames late and are attached as tags to Render.Grass.GpuTimer.
+struct GrassGpuTimer
+{
+    static constexpr u32 Depth = 4;
+    struct Slot
+    {
+        ID3D11Query* disjoint = nullptr;
+        ID3D11Query* stamp[3] = {};
+        bool pending = false;
+    };
+    Slot slots[Depth];
+    u32 next = 0, frame = u32(-1);
+    ID3D11Device* owner = nullptr;
+    bool failed = false;
+    Slot* active = nullptr;
+
+    void Release()
+    {
+        for (Slot& s : slots)
+        {
+            _RELEASE(s.disjoint);
+            for (ID3D11Query*& q : s.stamp) _RELEASE(q);
+            s.pending = false;
+        }
+        active = nullptr;
+    }
+    ~GrassGpuTimer() { Release(); }
+
+    static bool Create(ID3D11Device* device, D3D11_QUERY type, ID3D11Query*& query)
+    {
+        if (query) return true;
+        D3D11_QUERY_DESC desc{};
+        desc.Query = type;
+        return SUCCEEDED(device->CreateQuery(&desc, &query));
+    }
+
+    void Poll(ID3D11DeviceContext* context)
+    {
+        PROF_EVENT("Render.Grass.GpuTimer");
+        // state: 0 nothing pending, 1 oldest still running, 2 query error, 3 disjoint, 40+k stamp k not available, 5 result
+        u32 state = 0, pending = 0, last_hr = 0;
+        for (u32 i = 0; i < Depth; ++i)
+        {
+            Slot& s = slots[(next + i) % Depth];
+            if (!s.pending) continue;
+            ++pending;
+            D3D11_QUERY_DATA_TIMESTAMP_DISJOINT disjoint{};
+            const HRESULT hr = context->GetData(s.disjoint, &disjoint, sizeof(disjoint), D3D11_ASYNC_GETDATA_DONOTFLUSH);
+            last_hr = u32(hr);
+            if (hr == S_FALSE)
+            {
+                state = 1;
+                break; // newer slots cannot be ready either
+            }
+            UINT64 t[3] = {};
+            if (hr != S_OK || disjoint.Disjoint)
+            {
+                s.pending = false;
+                state = hr != S_OK ? 2 : 3;
+                continue;
+            }
+            // The disjoint query can be answered before the stamps are; keep the slot and ask again next frame.
+            bool ready = true, failed_stamp = false;
+            for (u32 k = 0; k < 3 && ready; ++k)
+            {
+                const HRESULT stamp_hr = context->GetData(s.stamp[k], &t[k], sizeof(UINT64), D3D11_ASYNC_GETDATA_DONOTFLUSH);
+                if (stamp_hr != S_OK)
+                {
+                    ready = false;
+                    failed_stamp = stamp_hr != S_FALSE;
+                    state = 40 + k;
+                    last_hr = u32(stamp_hr);
+                }
+            }
+            if (!ready)
+            {
+                if (failed_stamp)
+                {
+                    s.pending = false;
+                    continue;
+                }
+                break;
+            }
+            s.pending = false;
+            state = 5;
+            const double us = 1e6 / double(disjoint.Frequency);
+            PROF_TAG("GPU grass us", u32((t[2] - t[1]) * us));
+            PROF_TAG("GPU gather us", u32((t[1] - t[0]) * us));
+            PROF_TAG("GPU grass total us", u32((t[2] - t[0]) * us));
+        }
+        PROF_TAG("GPU timer state", state);
+        PROF_TAG("GPU timer pending", pending);
+        PROF_TAG("GPU timer hr", last_hr);
+    }
+
+    bool Begin()
+    {
+        ID3D11Device* device = HW.pDevice;
+        if (device != owner)
+        {
+            Release();
+            owner = device;
+            failed = false;
+        }
+        if (failed || frame == Device.dwFrame) return false;
+        auto* context = RenderDeviceContext();
+        Poll(context);
+        Slot& s = slots[next];
+        if (s.pending) return false;
+        bool ok = Create(device, D3D11_QUERY_TIMESTAMP_DISJOINT, s.disjoint);
+        for (ID3D11Query*& q : s.stamp) ok = ok && Create(device, D3D11_QUERY_TIMESTAMP, q);
+        if (!ok)
+        {
+            failed = true;
+            return false;
+        }
+        frame = Device.dwFrame;
+        context->Begin(s.disjoint);
+        context->End(s.stamp[0]);
+        active = &s;
+        return true;
+    }
+
+    void Stamp(u32 index) { RenderDeviceContext()->End(active->stamp[index]); }
+
+    void End()
+    {
+        auto* context = RenderDeviceContext();
+        context->End(active->stamp[2]);
+        context->End(active->disjoint);
+        active->pending = true;
+        active = nullptr;
+        next = (next + 1) % Depth;
+    }
+};
+
+GrassGpuTimer& GrassTimer()
+{
+    static GrassGpuTimer timer;
+    return timer;
+}
+}
+
+struct GrassGpuScope
+{
+    bool on;
+    explicit GrassGpuScope(bool owner) : on(owner && GrassTimer().Begin()) {}
+    void Split() { if (on) GrassTimer().Stamp(1); }
+    ~GrassGpuScope() { if (on) GrassTimer().End(); }
+};
+#else
+struct GrassGpuScope
+{
+    explicit GrassGpuScope(bool) {}
+    void Split() {}
+};
 #endif
 
 // Vars to store wind prev frame data ( Motion vectors )
@@ -71,6 +238,17 @@ void CDetailManager::hw_Load_Shaders()
 }
 
 #if RENDER == R_R4
+static bool RecordablePass(const SPass& pass)
+{
+    if (!pass.vs || !pass.ps || !pass.vs->recording_safe || !pass.ps->recording_safe ||
+        (pass.gs && pass.gs->gs && !pass.gs->recording_safe) ||
+        (pass.hs && pass.hs->sh && !pass.hs->recording_safe) ||
+        (pass.ds && pass.ds->sh && !pass.ds->recording_safe)) return false;
+    if (pass.constants) for (const auto& constant : pass.constants->table)
+        if (constant->handler && !constant->handler->parallel_safe()) return false;
+    return true;
+}
+
 bool CDetailManager::CanRecordShadow() const
 {
     if (!dtFS || !psDeviceFlags.is(rsDetails)) return true;
@@ -78,15 +256,11 @@ bool CDetailManager::CanRecordShadow() const
     {
         if (!object->shader || !object->shader->E[0]) return false;
         for (const auto& pass : object->shader->E[0]->passes)
-        {
-            if (!pass->vs || !pass->ps || !pass->vs->recording_safe || !pass->ps->recording_safe ||
-                (pass->gs && pass->gs->gs && !pass->gs->recording_safe) ||
-                (pass->hs && pass->hs->sh && !pass->hs->recording_safe) ||
-                (pass->ds && pass->ds->sh && !pass->ds->recording_safe)) return false;
-            if (pass->constants) for (const auto& constant : pass->constants->table)
-                if (constant->handler && !constant->handler->parallel_safe()) return false;
-        }
+            if (!RecordablePass(*pass)) return false;
     }
+    if (ps_r4_detail_instancing)
+        for (const auto& entry : hw_instanced_passes)
+            if (entry.shadow && entry.twin && !RecordablePass(*entry.twin)) return false;
     return true;
 }
 
@@ -96,7 +270,223 @@ bool CDetailManager::PrimeShadow(RenderContext& context)
     if (!dtFS || !psDeviceFlags.is(rsDetails)) return true;
     for (const auto* object : objects)
         for (const auto& pass : object->shader->E[0]->passes) context.Prime(*pass);
+    if (ps_r4_detail_instancing)
+        for (const auto& entry : hw_instanced_passes)
+            if (entry.shadow && entry.twin) context.Prime(*entry.twin);
     return true;
+}
+
+bool CDetailManager::hw_Instanced(light* L) const
+{
+    return ps_r4_detail_instancing && !L && hw_Geom_inst && hw_instance_frame == Device.dwFrame;
+}
+
+SPass* CDetailManager::hw_InstancedPass(ref_pass& source)
+{
+    for (auto& entry : hw_instanced_passes)
+        if (entry.source._get() == source._get()) return entry.twin._get();
+    return nullptr;
+}
+
+void CDetailManager::hw_BuildInstancedPasses()
+{
+    for (CDetail* object : objects)
+        for (u32 lod = 0; lod < 2; ++lod)
+        {
+            ShaderElement* element = object->shader ? object->shader->E[lod]._get() : nullptr;
+            if (!element) continue;
+            for (auto& pass : element->passes)
+            {
+                if (!pass) continue;
+                bool known = false;
+                for (auto& entry : hw_instanced_passes)
+                    if (entry.source._get() == pass._get())
+                    {
+                        entry.shadow = entry.shadow || lod == 0;
+                        known = true;
+                        break;
+                    }
+                if (known) continue;
+                // Unsupported shaders get a null twin once and stay on the batched path.
+                SPass* twin = DEV->_CreateDetailTwin(*pass);
+                InstancedPass entry;
+                entry.source = pass;
+                if (twin) entry.twin = twin;
+                entry.shadow = lod == 0;
+                hw_instanced_passes.push_back(entry);
+                Msg("* [DETAILS] Instancing %s: %s", twin ? "ready" : "unavailable, batched path stays",
+                    pass->vs ? pass->vs->cName.c_str() : "?");
+            }
+        }
+}
+
+void CDetailManager::hw_EnsureInstanceCapacity(u32 required, bool gpu)
+{
+    if (hw_instanceVB && required <= hw_instance_capacity && gpu == hw_instance_gpu) return;
+    u32 capacity = hw_instance_capacity;
+    if (required > capacity)
+    {
+        R_ASSERT2(required <= (u32(-1) >> 8), "detail instance capacity overflow");
+        capacity = (required + required / 4 + 4095) & ~4095u;
+    }
+    capacity = _max(capacity, 1u << 16);
+    if (hw_instanceVB)
+    {
+        HW.stats_manager.decrement_stats_vb(hw_instanceVB);
+        _RELEASE(hw_instanceVB);
+    }
+    if (hw_gatherer) hw_gatherer->ResetOutput();
+    D3D_BUFFER_DESC desc{};
+    desc.ByteWidth = capacity * sizeof(detail_instancing::Instance);
+    if (gpu)
+    {
+        // Written by the gather shader, read as a vertex buffer.
+        desc.Usage = D3D_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_UNORDERED_ACCESS;
+        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+    }
+    else
+    {
+        desc.Usage = D3D_USAGE_DYNAMIC;
+        desc.BindFlags = D3D_BIND_VERTEX_BUFFER;
+        desc.CPUAccessFlags = D3D_CPU_ACCESS_WRITE;
+    }
+    R_CHK(HW.pDevice->CreateBuffer(&desc, nullptr, &hw_instanceVB));
+    HW.stats_manager.increment_stats_vb(hw_instanceVB);
+    hw_instance_capacity = capacity;
+    hw_instance_gpu = gpu;
+    Msg("* [DETAILS] Instance stream: %u instances (%u KB, %s)", capacity, desc.ByteWidth / 1024, gpu ? "gpu gather" : "cpu fill");
+}
+
+// Fills the instance record of one list. Every item gets a record (alpha 0 collapses the blade in the shader), so the
+// output offset of each list is known before any list is processed and the lists can be written in parallel.
+static void FillInstanceList(CDetailManager::SlotRenderItems& list, detail_instancing::Instance* destination, bool valid_delta)
+{
+    const u32 count = u32(list.size());
+    if (list.cache_state == CDetailManager::SlotRenderItems::Ready && list.cached_constants.size() == count * 5)
+    {
+        const Fvector4* rows = list.cached_constants.data();
+        const Fvector4* extra = rows + count * 4;
+        for (u32 i = 0; i < count; ++i)
+        {
+            auto& out = destination[i];
+            memcpy(out.m0, &rows[i * 4 + 0], sizeof(Fvector4));
+            memcpy(out.m1, &rows[i * 4 + 1], sizeof(Fvector4));
+            memcpy(out.m2, &rows[i * 4 + 2], sizeof(Fvector4));
+            memcpy(out.normal_alpha, &extra[i], sizeof(Fvector4));
+            out.sun_hemi_distance[0] = rows[i * 4 + 3].x;
+            out.sun_hemi_distance[1] = rows[i * 4 + 3].w;
+            out.sun_hemi_distance[2] = list.cached_max_distance;
+            out.sun_hemi_distance[3] = 0.f;
+        }
+        return;
+    }
+    bool settled = valid_delta;
+    for (u32 i = 0; i < count; ++i)
+    {
+        CDetailManager::SlotItem& instance = *list[i];
+        instance.alpha += GoToValue(instance.alpha, instance.alpha_target);
+        settled = settled && instance.alpha == instance.alpha_target && _valid(instance.alpha) &&
+            instance.alpha > 0.f && _valid(instance.distance) && instance.distance >= 0.f;
+        auto& out = destination[i];
+        const Fmatrix& M = instance.mRotY_calculated;
+        out.m0[0] = M._11; out.m0[1] = M._21; out.m0[2] = M._31; out.m0[3] = M._41;
+        out.m1[0] = M._12; out.m1[1] = M._22; out.m1[2] = M._32; out.m1[3] = M._42;
+        out.m2[0] = M._13; out.m2[1] = M._23; out.m2[2] = M._33; out.m2[3] = M._43;
+        out.normal_alpha[0] = instance.normal.x;
+        out.normal_alpha[1] = instance.normal.y;
+        out.normal_alpha[2] = instance.normal.z;
+        out.normal_alpha[3] = instance.alpha;
+        out.sun_hemi_distance[0] = instance.c_sun;
+        out.sun_hemi_distance[1] = instance.c_hemi;
+        out.sun_hemi_distance[2] = instance.distance;
+        out.sun_hemi_distance[3] = 0.f;
+    }
+    list.cache_state = settled ? CDetailManager::SlotRenderItems::Settled : CDetailManager::SlotRenderItems::Invalid;
+}
+
+// Writes every visible blade of every wave variant once per frame. Distance fade moves to the shader, so the same
+// stream serves the main pass and the sun cascades.
+void CDetailManager::hw_Fill_Instances()
+{
+    PROF_EVENT("Render.Grass.FillInstances");
+    hw_BuildInstancedPasses();
+    // The settings this capture was taken with.
+    PROF_TAG("Cfg density x1000", u32(ps_r__Detail_density * 1000.f + 0.5f));
+    PROF_TAG("Cfg radius m", dm_current_size * 2);
+    PROF_TAG("Cfg thin start", u32(ps_r4_detail_thin.x + 0.5f));
+    PROF_TAG("Cfg thin end", u32(ps_r4_detail_thin.y + 0.5f));
+    PROF_TAG("Cfg thin keep x100", u32(ps_r4_detail_thin.z * 100.f + 0.5f));
+    std::vector<InstanceJob> jobs;
+    u32 total = 0, full_total = 0;
+    // Only the gather stream can be thinned (r4_detail_thin): the CPU stream writes whole lists.
+    auto layout = [&](bool thin)
+    {
+        const detail_gather::Thin thinning = detail_gather::ReadThin();
+        jobs.clear();
+        total = full_total = 0;
+        for (u32 variant = 0; variant < 3; ++variant)
+        {
+            hw_inst_base[variant].assign(objects.size(), 0);
+            hw_inst_count[variant].assign(objects.size(), 0);
+            for (u32 O = 0; O < objects.size(); ++O)
+            {
+                hw_inst_base[variant][O] = total;
+                for (SlotItemVec* items : m_visibles[variant][O])
+                {
+                    SlotRenderItems* list = static_cast<SlotRenderItems*>(items);
+                    const u32 full = u32(list->size());
+                    const detail_gather::Thinned kept = thin && thinning.keep < 1.f ?
+                        detail_gather::ThinnedCount(full, list->slot_distance, thinning) : detail_gather::Thinned{full, 65535u};
+                    jobs.push_back({list, total, kept.count, kept.tip});
+                    total += kept.count;
+                    full_total += full;
+                }
+                hw_inst_count[variant][O] = total - hw_inst_base[variant][O];
+            }
+        }
+    };
+    bool gpu = ps_r4_detail_instancing >= 2 && detail_gather::Acquire(hw_gatherer);
+    layout(gpu);
+    hw_EnsureInstanceCapacity(_max(total, 1u), gpu);
+    if (gpu && hw_Fill_Instances_Gpu(jobs.data(), u32(jobs.size()), total))
+    {
+        hw_instance_frame = Device.dwFrame;
+        PROF_TAG("Instance stream", total);
+        PROF_TAG("Instance stream before thinning", full_total);
+        return;
+    }
+    if (gpu)
+    {
+        // Resource creation failed: stay on the CPU stream for good.
+        hw_gatherer->failed = true;
+        Msg("! [DETAILS] GPU gather unavailable, using the CPU instance stream");
+        layout(false);
+        hw_EnsureInstanceCapacity(_max(total, 1u), false);
+    }
+    const bool valid_delta = _valid(Device.fTimeDelta) && Device.fTimeDelta >= 0.f;
+    {
+        // Cache blocks are built on the owner (it keeps a shared byte budget); the fill itself is parallel.
+        PROF_EVENT("Render.Grass.FillInstances.Cache");
+        for (const InstanceJob& job : jobs)
+        {
+            if (!valid_delta) job.list->cache_state = SlotRenderItems::Invalid;
+            if (job.list->cache_state == SlotRenderItems::Settled) BuildRenderCache(*job.list);
+        }
+    }
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    CHK_DX(HW.pContext->Map(hw_instanceVB, 0, D3D_MAP_WRITE_DISCARD, 0, &mapped));
+    auto* destination = static_cast<detail_instancing::Instance*>(mapped.pData);
+    {
+        PROF_EVENT("Render.Grass.FillInstances.Write");
+        concurrency::parallel_for(size_t(0), jobs.size(), [&](size_t index)
+        {
+            FillInstanceList(*jobs[index].list, destination + jobs[index].base, valid_delta);
+        });
+    }
+    HW.pContext->Unmap(hw_instanceVB, 0);
+    hw_instance_frame = Device.dwFrame;
+    PROF_TAG("Instance stream", total);
 }
 #endif
 
@@ -127,6 +517,19 @@ void CDetailManager::hw_Render(light* L)
 	RCache.set_CullMode(CULL_NONE);
 	RCache.set_xform_world(Fidentity);
 	RCache.set_Geometry(hw_Geom);
+#if RENDER == R_R4
+	// Main pass and sun cascades share one instance stream per frame; it is filled here, on the owner.
+	GrassGpuScope gpu_timer(ps_r4_detail_instancing && !L && !RenderContextId());
+	if (ps_r4_detail_instancing && !L && !RenderContextId())
+	{
+		// Built on first use, so the cvar can be switched at any time.
+		if (!hw_Geom_inst)
+			hw_Load_Instanced();
+		if (hw_Geom_inst && hw_instance_frame != Device.dwFrame)
+			hw_Fill_Instances();
+	}
+	gpu_timer.Split();
+#endif
 	float scale = 1.f / float(quant);
 	Fvector4 wave, prev_wave;
 	Fvector4 consts;
@@ -183,12 +586,15 @@ void CDetailManager::hw_Render_dump(const Fvector4& consts, const Fvector4& wave
     const bool use_cache = hw_BatchSize && valid_delta && RCache.RenderPhase(RImplementation.phase) == CRender::PHASE_NORMAL &&
         !Device.m_SecondViewport.IsSVPFrame() && _valid(fade_distance) && fade_distance >= 0.f &&
         RImplementation.GMBase.is_sector_visible(RImplementation.pOutdoorSector);
-    u32 cached_instances = 0, legacy_instances = 0;
+    u32 cached_instances = 0, legacy_instances = 0, instanced_total = 0;
 #endif
 	if (RCache.RenderPhase(RImplementation.phase) == CRender::PHASE_SMAP && var_id == 0)
 		return;
 #if RENDER == R_R4
     aoe_temporal::AnimationHistory(true, prev_wave, prev_wind);
+    const bool instanced = hw_Instanced(L) && RImplementation.GMBase.is_sector_visible(RImplementation.pOutdoorSector);
+    bool geometry_instanced = false;
+    if (instanced) RCache.set_Geometry(hw_Geom);
 #endif
 
 	static shared_str strConsts("consts");
@@ -240,10 +646,38 @@ void CDetailManager::hw_Render_dump(const Fvector4& consts, const Fvector4& wave
 		xr_vector<SlotItemVec*>& vis = list[O];
 		if (!vis.empty())
 		{
+#if RENDER == R_R4
+			// An object is drawn instanced only when every one of its passes has an instanced twin.
+			bool object_instanced = instanced && O < hw_inst_count[var_id].size() && hw_inst_count[var_id][O];
+			if (object_instanced)
+				for (auto& source : Object.shader->E[lod_id]->passes)
+					if (!source || !hw_InstancedPass(source))
+					{
+						object_instanced = false;
+						break;
+					}
+			if (instanced && object_instanced != geometry_instanced)
+			{
+				RCache.set_Geometry(object_instanced ? hw_Geom_inst : hw_Geom);
+				if (object_instanced)
+				{
+					ID3D11Buffer* stream = hw_instanceVB;
+					const UINT stride = sizeof(detail_instancing::Instance), offset = 0;
+					RenderDeviceContext()->IASetVertexBuffers(1, 1, &stream, &stride, &offset);
+				}
+				geometry_instanced = object_instanced;
+			}
+#endif
 			for (u32 iPass = 0; iPass < Object.shader->E[lod_id]->passes.size(); ++iPass)
 			{
 				// Setup matrices + colors (and flush it as necessary)
 				//RCache.set_Element				(Object.shader->E[lod_id]);
+#if RENDER == R_R4
+				SPass* twin = object_instanced ? hw_InstancedPass(Object.shader->E[lod_id]->passes[iPass]) : nullptr;
+				if (twin)
+					RCache.set_Pass(*twin);
+				else
+#endif
 				RCache.set_Element(Object.shader->E[lod_id], iPass);
 				RImplementation.apply_lmaterial();
 
@@ -300,6 +734,20 @@ void CDetailManager::hw_Render_dump(const Fvector4& consts, const Fvector4& wave
 					}
 				}
 
+#if RENDER == R_R4
+				if (twin)
+				{
+					static shared_str strFade("aoe_detail_fade");
+					RCache.set_c(strFade, Fvector4().set(fade_distance, 0.f, 0.f, 0.f));
+					const u32 count = hw_inst_count[var_id][O];
+					RCache.RenderInstanced(D3DPT_TRIANGLELIST, count, hw_inst_vertex_offset[O], 0, Object.number_vertices,
+						hw_inst_index_offset[O], Object.number_indices / 3, hw_inst_base[var_id][O]);
+					if (!RenderContextId()) Device.Statistic->RenderDUMP_DT_Count += count;
+					RCache.stat.r.s_details.add(count * Object.number_vertices);
+					instanced_total += count;
+					continue;
+				}
+#endif
 				Fvector4* c_ExData = 0;
 				{
 					void* pExtraData;
@@ -459,6 +907,8 @@ void CDetailManager::hw_Render_dump(const Fvector4& consts, const Fvector4& wave
 		iOffset += hw_BatchSize * Object.number_indices;
 	}
 #if RENDER == R_R4
+    if (geometry_instanced) RCache.set_Geometry(hw_Geom);
+    PROF_TAG("Instanced instances", instanced_total);
     PROF_TAG("Cached instances", cached_instances);
     PROF_TAG("Legacy instances", legacy_instances);
     PROF_TAG("Cache bytes", m_render_cache_bytes);

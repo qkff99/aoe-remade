@@ -11,6 +11,13 @@
 #include "detailmodel.h"
 #include "light.h"
 
+#if RENDER == R_R4
+namespace detail_gather
+{
+struct Gatherer;
+}
+#endif
+
 #ifdef _EDITOR
 //.	#include	"ESceneClassList.h"
 	const int	dm_max_decompress	= 14;
@@ -98,6 +105,16 @@ public:
         enum CacheState { Invalid, Settled, Ready } cache_state = Invalid;
         xr_vector<Fvector4> cached_constants;
         float cached_max_distance = 0.f;
+        float slot_distance = 0.f; // squared camera distance of the slot, as of the last visibility update (every item has it)
+        // r4_detail_instancing 2: records live in a GPU arena. `revision` changes whenever the list content may differ,
+        // `settled_revision` is the revision at which every item was found at rest.
+        u32 revision = 0;
+        u32 settled_revision = u32(-1);
+        u32 arena_revision = u32(-1), arena_epoch = 0, arena_offset = 0, arena_capacity = 0; // records
+        bool Unchanged() const
+        {
+            return (cache_state == Ready && cached_constants.size() == size() * 5) || settled_revision == revision;
+        }
     };
 #else
     using SlotRenderItems = SlotItemVec;
@@ -256,6 +273,42 @@ public:
 	ref_constant hwc_s_array;
 	void hw_Load();
 	void hw_Load_Geom();
+#if RENDER == R_R4
+	// Instanced grass (r4_detail_instancing): one mesh copy per model, per-instance stream 1 and instanced twins of the
+	// installed detail passes. Legacy batched geometry above stays as the fallback.
+	struct InstancedPass
+	{
+		ref_pass source, twin;
+		bool shadow; // E[0] passes are the ones shadow recording uses
+	};
+	xr_vector<InstancedPass> hw_instanced_passes;
+	ref_geom hw_Geom_inst;
+	ID3DVertexBuffer* hw_inst_VB = nullptr;
+	ID3DIndexBuffer* hw_inst_IB = nullptr;
+	xr_vector<u32> hw_inst_vertex_offset, hw_inst_index_offset; // per object, into the single-copy mesh
+	ID3DVertexBuffer* hw_instanceVB = nullptr;
+	u32 hw_instance_capacity = 0;
+	u32 hw_instance_frame = u32(-1); // frame the instance stream was filled for
+	xr_vector<u32> hw_inst_base[3], hw_inst_count[3]; // per wave variant and object
+	bool hw_instance_gpu = false; // stream is written by the gather shader (r4_detail_instancing 2)
+	detail_gather::Gatherer* hw_gatherer = nullptr;
+	struct InstanceJob
+	{
+		SlotRenderItems* list;
+		u32 base;
+		u32 count; // instances taken from the list (all of them unless the stream is thinned)
+		u32 tip; // scale of the last of them, 0..65535 (see detail_gather::ThinnedCount)
+	};
+	void hw_Load_Instanced();
+	void hw_Unload_Instanced();
+	void hw_EnsureInstanceCapacity(u32 required, bool gpu);
+	void hw_BuildInstancedPasses();
+	void hw_Fill_Instances();
+	bool hw_Fill_Instances_Gpu(const InstanceJob* jobs, u32 job_count, u32 total);
+	SPass* hw_InstancedPass(ref_pass& source);
+	// Instanced pass lookup never creates anything, so recording threads may call it.
+	bool hw_Instanced(light* L) const;
+#endif
 	void hw_Load_Shaders();
 	void hw_Unload();
 	void hw_Render(light* L = nullptr);

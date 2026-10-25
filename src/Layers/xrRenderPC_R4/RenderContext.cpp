@@ -31,6 +31,7 @@ struct RenderContext::State
         ref_declaration declaration;
         ComPtr<ID3DBlob> signature;
         ComPtr<ID3D11InputLayout> layout;
+        bool failed = false; // reported once; the draws that need it are skipped
     };
 
     u32 id;
@@ -112,6 +113,8 @@ ID3D11InputLayout* ContextInputLayout(SDeclaration* declaration, ID3DBlob* signa
 {
     R_ASSERT(current && declaration && signature);
     auto& result = current->layouts[{declaration, signature}];
+    if (result.failed)
+        return nullptr;
     if (!result.layout)
     {
         result.declaration = ref_declaration(declaration);
@@ -154,8 +157,10 @@ ID3D11InputLayout* ContextInputLayout(SDeclaration* declaration, ID3DBlob* signa
                 FS.w_close(writer);
                 Msg("! Input layout report saved to $logs$/%s", filename);
             }
+            // A recorded draw whose geometry does not fit its vertex shader is skipped, not fatal.
+            result.failed = true;
+            return nullptr;
         }
-        R_CHK2(created, "CreateInputLayout failed; see input layout diagnostics in the log");
     }
     return result.layout.Get();
 }

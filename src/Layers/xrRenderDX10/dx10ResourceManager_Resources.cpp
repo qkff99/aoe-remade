@@ -12,6 +12,9 @@
 #include <D3DX10Core.h>
 
 #include "../xrRender/ResourceManager.h"
+#if defined(USE_DX11) && RENDER == R_R4
+#include "../xrRenderPC_R4/DetailInstancing.h"
+#endif
 #include "../xrRender/tss.h"
 #include "../xrRender/blenders/blender.h"
 #include "../xrRender/blenders/blender_recorder.h"
@@ -103,6 +106,56 @@ void CResourceManager::_DeleteState(const SState* state)
 }
 
 //--------------------------------------------------------------------------------------------------------------
+#if defined(USE_DX11) && RENDER == R_R4
+SPass* CResourceManager::_CreateDetailTwin(SPass& source)
+{
+	if (!source.vs || !source.ps || !source.state || !source.constants)
+		return nullptr;
+	string256 base;
+	xr_strcpy(base, sizeof(base), source.vs->cName.c_str());
+	if (strchr(base, '('))
+		return nullptr;
+	// _CreateVS appends the skinning mode to the resource name; strip it to get the shader file name back.
+	const int skinning = Engine.External.GetSkinningMode();
+	if (skinning > 0)
+	{
+		const xr_string suffix = "_" + xr_string::ToString(skinning);
+		const size_t length = xr_strlen(base);
+		if (length > suffix.size() && !strcmp(base + length - suffix.size(), suffix.c_str()))
+			base[length - suffix.size()] = 0;
+	}
+	string256 name;
+	strconcat(sizeof(name), name, base, detail_instancing::resource_suffix);
+	SVS* vs = _CreateVS(name);
+	if (!vs || !vs->vs || !vs->detail_instanced)
+		return nullptr;
+
+	// Same state, pixel shader and textures as the source pass; constants merged for the new vertex shader.
+	R_constant_table table;
+	table.merge(&source.ps->constants);
+	table.merge(&vs->constants);
+	if (source.gs) table.merge(&source.gs->constants);
+	if (source.hs) table.merge(&source.hs->constants);
+	if (source.ds) table.merge(&source.ds->constants);
+	for (auto& constant : table.table)
+		if (R_constant* original = source.constants->get(*constant->name))
+			constant->handler = original->handler;
+
+	SPass proto;
+	proto.state = source.state;
+	proto.ps = source.ps;
+	proto.vs = vs;
+	proto.gs = source.gs;
+	proto.hs = source.hs;
+	proto.ds = source.ds;
+	proto.cs = source.cs;
+	proto.constants = _CreateConstantTable(table);
+	proto.T = source.T;
+	proto.C = source.C;
+	return _CreatePass(proto);
+}
+#endif
+
 SPass* CResourceManager::_CreatePass(const SPass& proto)
 {
 #if defined(USE_DX11) && RENDER == R_R4

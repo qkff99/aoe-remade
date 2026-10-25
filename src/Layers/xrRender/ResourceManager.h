@@ -178,6 +178,10 @@ public:
 	void _DeleteVS(const SVS* VS);
 
 	SPass* _CreatePass(const SPass& proto);
+#if defined(USE_DX11) && RENDER == R_R4
+	// Instanced twin of a detail pass (grass); null when the installed vertex shader cannot be adapted.
+	SPass* _CreateDetailTwin(SPass& source);
+#endif
 	void _DeletePass(const SPass* P);
 
 	// Shader compiling / optimizing

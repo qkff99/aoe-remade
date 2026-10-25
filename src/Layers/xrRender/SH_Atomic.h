@@ -18,6 +18,7 @@
 struct ECORE_API SInputSignature : public xr_resource_flagged
 {
 	ID3DBlob*							signature;
+	bool								position_only; // the shader reads nothing but POSITION, so position-only geometry fits it
 	SInputSignature(ID3DBlob* pBlob);
 	~SInputSignature();
 };
@@ -33,6 +34,8 @@ struct ECORE_API SVS : public xr_resource_named
     bool particle_position_safe = false, particle_uses_vp = false;
     bool tree_shadow_batch_safe = false;
     u32 tree_shadow_inputs = 0;
+    // Compiled from the detail instancing adapter (per-instance stream instead of constant arrays).
+    bool detail_instanced = false;
     bool shadow_depth_cache_safe = false;
     u32 shadow_shader_revision = 0;
 #endif

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "../xrRender/ParticlePositionProof.h"
 #include "r4.h"
+#include "DetailInstancing.h"
 #include "../xrRender/fbasicvisual.h"
 #include "../../xrEngine/xr_object.h"
 #include "../../xrEngine/CustomHUD.h"
@@ -2195,6 +2196,27 @@ HRESULT CRender::shader_compile(
 		}
 	}
 
+	// Detail instancing twin: compile the installed shader through the adapter. When it does not follow the
+	// stock contract (or the adapted source fails), the plain source is compiled and detail_instanced stays false.
+	DWORD const* const original_source = pSrcData;
+	const UINT original_size = SrcDataLen;
+	std::string instanced_source;
+	bool detail_instanced = false, detail_instancing_failed = false;
+	if ('v' == pTarget[0] && strstr(name, detail_instancing::option))
+	{
+		if (detail_instancing::Adapt((const char*)pSrcData, SrcDataLen, instanced_source))
+		{
+			pSrcData = (DWORD const*)instanced_source.data();
+			SrcDataLen = (UINT)instanced_source.size();
+			detail_instanced = true;
+		}
+		else
+		{
+			detail_instancing_failed = true;
+			Msg("~ [DETAILS] %s does not match the instancing contract, batched grass stays", name);
+		}
+	}
+
 	HRESULT _result = E_FAIL;
 
 	string_path folder_name, folder;
@@ -2300,9 +2322,38 @@ HRESULT CRender::shader_compile(
 					&pShaderBuf,
 					&pErrorBuf
 				);
+			if (FAILED(_result) && detail_instanced)
+			{
+				Msg("! [DETAILS] %s: instanced source failed, batched grass stays", name);
+				if (pErrorBuf)
+					Log("! error: ", (LPCSTR)pErrorBuf->GetBufferPointer());
+				_RELEASE(pErrorBuf);
+				_RELEASE(pShaderBuf);
+				detail_instanced = false;
+				detail_instancing_failed = true;
+				pSrcData = original_source;
+				SrcDataLen = original_size;
+				_result =
+					D3DCompile(
+						pSrcData,
+						SrcDataLen,
+						"",
+						defines, &Includer, pFunctionName,
+						pTarget,
+						Flags, 0,
+						&pShaderBuf,
+						&pErrorBuf
+					);
+			}
 		}
 
-		if (SUCCEEDED(_result))
+		if (SUCCEEDED(_result) && detail_instancing_failed)
+		{
+			// Plain bytecode must not be cached under the instanced name.
+			_result = create_shader(pTarget, (DWORD*)pShaderBuf->GetBufferPointer(), (u32)pShaderBuf->GetBufferSize(),
+			                        file_name, result, o.disasm, name, pSrcData, SrcDataLen, defines, Flags, pFunctionName);
+		}
+		else if (SUCCEEDED(_result))
 		{
 			IWriter* file = FS.w_open(file_name);
 
@@ -2328,6 +2379,9 @@ HRESULT CRender::shader_compile(
 				Msg("Can't compile shader hr=0x%08x", _result);
 		}
 	}
+
+	if ('v' == pTarget[0] && SUCCEEDED(_result) && result)
+		((SVS*)result)->detail_instanced = detail_instanced;
 
 	return _result;
 }

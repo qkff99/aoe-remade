@@ -128,6 +128,7 @@ public:
 	R_tree tree;
     u32 recording_phase = 0;
     bool recording_grass = false;
+    bool vs_position_only = false; // the bound vertex shader reads only POSITION (see SInputSignature)
 #if defined(USE_DX11) && RENDER == R_R4
     const RenderObjectSnapshot* recording_object = nullptr;
 #endif
@@ -345,6 +346,7 @@ public:
 
 	IC void set_Element(ShaderElement* S, u32 pass = 0);
 	IC void set_Element(ref_selement& S, u32 pass = 0) { set_Element(&*S, pass); }
+	IC void set_Pass(SPass& P);
 
 	IC void set_Shader(Shader* S, u32 pass = 0);
 	IC void set_Shader(ref_shader& S, u32 pass = 0) { set_Shader(&*S, pass); }
@@ -505,6 +507,9 @@ public:
 
 	ICF void Render(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV, u32 startI, u32 PC);
 	ICF void Render(D3DPRIMITIVETYPE T, u32 startV, u32 PC);
+#if defined(USE_DX11) && RENDER == R_R4
+	ICF void RenderInstanced(D3DPRIMITIVETYPE T, u32 instanceCount, u32 baseV, u32 startV, u32 countV, u32 startI, u32 PC, u32 startInstance);
+#endif
 
 #ifdef USE_DX11
 	ICF void Compute(UINT ThreadGroupCountX, UINT ThreadGroupCountY, UINT ThreadGroupCountZ);
@@ -572,7 +577,7 @@ private:
 	//	DirectX 10 internal functionality
 	//void CreateConstantBuffers();
 	//void DestroyConstantBuffers();
-	void ApplyVertexLayout();
+	bool ApplyVertexLayout(); // false: a recorded draw has geometry its vertex shader cannot read, skip it
 	void ApplyRTandZB();
 	void ApplyPrimitieTopology(D3D_PRIMITIVE_TOPOLOGY Topology);
 	bool CBuffersNeedUpdate(ref_cbuffer buf1[MaxCBuffers], ref_cbuffer buf2[MaxCBuffers], u32& uiMin, u32& uiMax);

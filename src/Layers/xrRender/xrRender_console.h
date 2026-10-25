@@ -233,6 +233,8 @@ extern ECORE_API int ps_r4_smapvis;
 extern ECORE_API int ps_r4_static_light_cache;
 extern ECORE_API int ps_r4_mt_sun_shadows;
 extern ECORE_API int ps_r4_mt_rain_shadows;
+extern ECORE_API int ps_r4_detail_instancing;
+extern ECORE_API Fvector3 ps_r4_detail_thin;
 
 /* --- HDR10 parameters --- */
 extern ECORE_API float ps_r4_hdr10_whitepoint_nits; // r4-only
