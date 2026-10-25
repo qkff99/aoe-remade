@@ -22,7 +22,6 @@
 #include "../../xrEngine/xr_object.h"
 #if RENDER == R_R4
 #include "../xrRenderPC_R4/Dlss/DlssNativeUi.h"
-#include "../xrRenderPC_R4/LocalLightDebug.h"
 #endif
 
 using namespace R_dsgraph;
@@ -459,13 +458,6 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 void CDSGraphManager::r_dsgraph_render_hud()
 {
 	PROF_EVENT("r_dsgraph_render_hud");
-	if (g_hud_trace)
-	{
-		HudTraceMsg("[HUD] render: mapHUD=%u sorted=%u emissive=%u distort=%u camAttached=%u", u32(RGraph.mapHUD.size()),
-			u32(RGraph.mapHUDSorted.Sorted.size()), u32(RGraph.mapHUDSorted.Emissive.size()),
-			u32(RGraph.mapHUDSorted.Distort.size()), u32(RGraph.mapCamAttached.size()));
-		HudTraceEnd(u32(RGraph.mapHUD.size() + RGraph.mapHUDSorted.Sorted.size()));
-	}
 	CHudInitializer initializer(true);
 
 	// Rendering
@@ -563,14 +555,6 @@ void CDSGraphManager::r_dsgraph_capture_hud()
 {
 	if (g_hud)
 	{
-		if (this == &RImplementation.GMBase && (g_hud_trace_armed || g_hud_watch))
-		{
-			HudTraceBegin(g_hud_trace_armed);
-			g_hud_trace_armed = false;
-			HudTraceMsg("[HUD] --- frame %u camera=(%.3f,%.3f,%.3f) dir=(%.3f,%.3f,%.3f)", Device.dwFrame,
-				Device.vCameraPosition.x, Device.vCameraPosition.y, Device.vCameraPosition.z,
-				Device.vCameraDirection.x, Device.vCameraDirection.y, Device.vCameraDirection.z);
-		}
 		g_hud->Render_Last(dcast_IPortalTraverser());
 		set_Object();
 	}
@@ -919,9 +903,6 @@ void CDSGraphManager::r_dsgraph_capture_lights()
 #else
 				if (L->get_LOD() > ps_r2_shadow_lod_min && L->has_light_visible_from_sectors(*this))
 				{
-#if defined(USE_DX11) && RENDER == R_R4
-                    if (LocalLightDebug::active) LocalLightDebug::ParentPassed(*L);
-#endif
 					RImplementation.Lights.add_light(L);
 				}
 #endif

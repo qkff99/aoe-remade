@@ -240,7 +240,7 @@ try
     dispatch.viewSpaceToMetersFactor = 1.0f;
     dispatch.enableSharpening = frame.enableSharpening;
     dispatch.sharpness = frame.sharpness;
-    dispatch.reset = m_lastReset = m_history.Begin(frame.frame, frame.cameraCut);
+    dispatch.reset = m_history.Begin(frame.frame, frame.cameraCut);
     // Same post-upscale CAS as DLSS; do not apply RCAS a second time.
     ContextScope state(m_context.Get(), m_state.Get());
     ID3D11SamplerState* samplers[] = {m_samplers[0].Get(), m_samplers[1].Get()};

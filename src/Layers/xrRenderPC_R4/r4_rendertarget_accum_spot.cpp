@@ -1,5 +1,4 @@
 #include "stdafx.h"
-#include "LocalLightDebug.h"
 #include "../xrRender/du_cone.h"
 #include "..\xrRender\CHudInitializer.h"
 
@@ -11,7 +10,6 @@ void CRenderTarget::accum_spot_impl(Light* L, u32& marker)
 	PROF_EVENT("CRenderTarget::accum_spot");
     if constexpr (!Recorded)
     {
-        if (LocalLightDebug::active) LocalLightDebug::Submitted(*L);
         phase_accumulator();
         ++RImplementation.stats.l_visible;
     }

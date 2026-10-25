@@ -82,10 +82,6 @@ constexpr size_t history_budget = 64u * 1024u * 1024u;
 size_t history_bytes = 0;
 u32 frame_attempts = 0, frame_draws = 0, frame_cold = 0;
 u64 frame_uploaded = 0;
-// r4_upscaler_motion_dump: one scene frame of per-shader draw outcomes.
-bool dump_pending = false, dump_active = false;
-std::map<std::string, u32> dump_outcomes;
-std::unordered_map<ID3D11DeviceChild *, std::string> unowned_vertex;
 using Key = std::array<uintptr_t, 10>;
 struct History
 {
@@ -489,17 +485,6 @@ bool Candidate(const char *name)
            !strncmp(name, "shadow_direct_model", 19);
 }
 
-void Note(const char *outcome, ID3D11DeviceChild *vertex_shader, ID3D11DeviceChild *pixel_shader)
-{
-    std::string key = outcome;
-    std::lock_guard<std::mutex> guard(programs_mutex);
-    const auto v = programs.find(vertex_shader), p = programs.find(pixel_shader);
-    const auto u = unowned_vertex.find(vertex_shader);
-    key += " | vs=" + (v != programs.end() ? v->second->name : u != unowned_vertex.end() ? u->second : "?");
-    key += " | ps=" + (p != programs.end() ? p->second->name : std::string("?"));
-    ++dump_outcomes[key];
-}
-
 void PreparePass(ID3D11DeviceChild *vertex_shader, ID3D11DeviceChild *pixel_shader)
 {
     std::shared_ptr<Program> vertex, pixel;
@@ -563,11 +548,6 @@ void Register(const char *name, const char *target, const char *entry, const voi
               const D3D_SHADER_MACRO *defines, unsigned flags, ID3D11DeviceChild *shader, const void *bytecode,
               size_t bytes)
 {
-    if (shader && target[0] == 'v' && !Candidate(name))
-    {
-        std::lock_guard<std::mutex> guard(programs_mutex);
-        unowned_vertex[shader] = name;
-    }
     if (!shader || !Candidate(name) || (target[0] != 'v' && target[0] != 'p'))
         return;
     auto program = std::make_shared<Program>();
@@ -841,18 +821,8 @@ void SetMatrix(CBackend &backend, R_constant *constant, const Fmatrix &value)
     backend.constants.set(constant, value);
 }
 
-void RequestDump()
-{
-    dump_pending = true;
-    dlss::TraceEvaluations(90);
-    Msg("[AOE temporal] Motion dump requested for the next main-view scene frame; FSR3 trace for 90 evaluations.");
-}
-
 void BeginFrame()
 {
-    dump_active = dump_pending;
-    dump_pending = false;
-    dump_outcomes.clear();
     ++epoch;
     frame_attempts = frame_draws = frame_cold = 0;
     frame_uploaded = 0;
@@ -911,12 +881,7 @@ bool Bind(CBackend &backend, unsigned base_vertex, unsigned first, unsigned coun
 {
     if (!enabled || !scene_geometry || !dlss::TemporalScene() || RenderContextId())
         return false;
-    const auto reject = [&](const char *reason)
-    {
-        if (dump_active)
-            Note(reason, backend.vs, backend.ps);
-        return false;
-    };
+    const auto reject = [](const char *) { return false; };
     if (backend.gs || backend.hs || backend.ds)
         return reject("NO JITTER: geometry/tessellation stage");
     if (backend.RenderPhase(RImplementation.phase) != CRender::PHASE_NORMAL)
@@ -942,10 +907,8 @@ bool Bind(CBackend &backend, unsigned base_vertex, unsigned first, unsigned coun
     auto &vertex = *cached_vertex;
     // The pixel shader cannot carry motion output (not an owned material, or no linked variant):
     // still jitter the geometry, as FSR assumes every scene draw is, and leave motion to the resolve pass.
-    const auto jitter_only = [&](const char *reason)
+    const auto jitter_only = [&](const char *)
     {
-        if (dump_active)
-            Note(reason, backend.vs, backend.ps);
         auto *context = RenderDeviceContext();
         ID3D11Buffer *constants = raster_settings.Get();
         context->VSSetConstantBuffers(12, 1, &constants);
@@ -1124,10 +1087,6 @@ bool Bind(CBackend &backend, unsigned base_vertex, unsigned first, unsigned coun
     StateManager.SetTemporalTarget(true, !legacy_target && !cached_pixel->original_legacy_output, write_motion);
     ++frame_draws;
     frame_cold += valid ? 0 : 1;
-    if (dump_active)
-        Note(valid ? "jittered, motion valid"
-                   : (std::string("jittered, ") + cold + (write_motion ? "" : " (no material motion)")).c_str(),
-             backend.vs, backend.ps);
     return true;
 }
 
@@ -1169,7 +1128,6 @@ void Forget(ID3D11DeviceChild *shader)
 {
     std::lock_guard<std::mutex> guard(programs_mutex);
     programs.erase(shader);
-    unowned_vertex.erase(shader);
     for (auto it = passes.begin(); it != passes.end();)
         if (it->first == shader || it->second == shader)
             it = passes.erase(it);
@@ -1185,13 +1143,5 @@ void ProfileFrame()
     PROF_TAG("Motion reactive draws", frame_cold);
     PROF_TAG("Motion previous-constant bytes", frame_uploaded);
     PROF_TAG("Motion cached bytes", u64(history_bytes));
-    if (!dump_active)
-        return;
-    dump_active = false;
-    Msg("[AOE temporal] Scene draws by outcome (frame %u, jitter %.4f,%.4f): %u candidates, %u wrapped, %u reactive",
-        Device.dwFrame, dlss::RasterJitter().x, dlss::RasterJitter().y, frame_attempts, frame_draws, frame_cold);
-    for (const auto &outcome : dump_outcomes)
-        Msg("[AOE temporal] %6u  %s", outcome.second, outcome.first.c_str());
-    dump_outcomes.clear();
 }
 } // namespace aoe_temporal

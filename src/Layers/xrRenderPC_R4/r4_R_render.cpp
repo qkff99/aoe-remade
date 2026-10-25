@@ -5,7 +5,6 @@
 #include "../../xrEngine/xr_object.h"
 #include "../xrRender/SkeletonCustom.h"
 #include "../../xrParticles/ParticlesAsyncManager.h"
-#include "LocalLightDebug.h"
 
 #include "../xrRender/QueryHelper.h"
 
@@ -122,7 +121,6 @@ void CRender::Render()
 
 	//.	VERIFY					(g_pGameLevel && g_pGameLevel->pHUD);
 
-    LocalLightDebug::BeginFrame();
 	dlss::BeginScene();
 	// Configure
 	RImplementation.o.distortion = FALSE; // disable distorion
@@ -200,12 +198,8 @@ void CRender::Render()
 		Target->disable_aniso();
 	}
 
-    if (sun_shadows)
-    {
-        sun_shadows->CapturePending();
-        sun_shadows->RecordStatic();
-    }
-
+    // Sun worker recording starts only after Part1: priming/invalidating the owner's caches
+    // between Part0 and Part1 made HUD hands and grass flicker on NVIDIA.
 	//  Redotix99: for 3D Shader Based Scopes 	
 	if (scope_3D_fake_enabled)
 	{
@@ -423,8 +417,6 @@ void CRender::Render()
         PROF_EVENT("Render.Combine");
 		Target->phase_combine();
 	}
-
-    LocalLightDebug::EndFrame();
 
 	if (Details)
 		Details->details_clear();

@@ -1,6 +1,5 @@
 #include "stdafx.h"
 #include "LocalLightShadows.h"
-#include "LocalLightDebug.h"
 #include "LocalShadowVisibility.h"
 #include "RenderContext.h"
 #include "LocalLightDepthCache.h"
@@ -641,7 +640,6 @@ void LocalLightShadows::BeginFrame(light_Package& package)
             }
         }
         if (!item->vis.visible) { ++state->rejected; return true; }
-        if (LocalLightDebug::active) LocalLightDebug::Accepted(*item);
         item->optimize_smap_size();
         return false;
     }), source.end());
@@ -906,7 +904,6 @@ void LocalLightShadows::Record()
         ++state->receiver_hidden;
         ++state->rejected;
         item.GMLight.RGraph.clear_dynamic<false>();
-        if (LocalLightDebug::active) LocalLightDebug::ReceiverRejected(item);
     }
     if (state->receiver_hidden)
     {
@@ -1059,7 +1056,6 @@ bool LocalLightShadows::RenderShadows(light_Package& package)
                     job->cache->visibility.pending = job->cache->selected;
                 if (recorded && block.accumulate)
                 {
-                    if (job->accumulate && LocalLightDebug::active) LocalLightDebug::Submitted(item);
                     graph.RGraph.clear_graph<false>(graph.RGraph.mapDynamicPasses, 0);
                     if (job->accumulate) ++RImplementation.stats.ls_shadowed_rendered;
                     ++skipped_static; ++skipped_dynamic;
@@ -1119,7 +1115,6 @@ bool LocalLightShadows::RenderShadows(light_Package& package)
         {
             for (const auto& item : state->unshadowed)
             {
-                if (LocalLightDebug::active) LocalLightDebug::Submitted(*item.source);
                 if (item.point) ++RImplementation.stats.ls_unshadowed_point_rendered;
                 else ++RImplementation.stats.ls_unshadowed_spot_rendered;
             }
@@ -1147,10 +1142,6 @@ bool LocalLightShadows::RenderShadows(light_Package& package)
     PROF_TAG("Receiver query polls", state->receiver_polled);
     PROF_TAG("Receiver result age max", state->receiver_age);
     PROF_TAG("Receiver hidden views", state->receiver_hidden);
-    if (LocalLightDebug::active)
-        LocalLightDebug::ReceiverFrame({Device.dwFrame, u32(state->lights.size()), state->receiver_tests,
-            state->receiver_spots, state->receiver_ready, state->receiver_pending, state->receiver_full,
-            state->receiver_age, state->receiver_hidden, state->receiver_reset});
     RCache.shadow_texture_source = nullptr; RCache.shadow_texture_view = nullptr;
     RCache.InvalidateAfterCommandList();
     RImplementation.phase = state->atlases.empty() ? saved_phase : CRender::PHASE_SMAP;

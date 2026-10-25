@@ -17,7 +17,7 @@ dlss::Size renderSize;
 dlss::Offset rasterJitter;
 dlss::Offset previousJitter;
 bool inScene = false, mainView = false, configured = false;
-unsigned jitterIndex = 0, traceEvaluations = 0;
+unsigned jitterIndex = 0;
 Fvector lastPosition, lastDirection;
 float lastFov = 0;
 bool haveCamera = false;
@@ -227,9 +227,7 @@ void BeginScene()
         const float baseBias = useFsr && ps_r__tf_Mipbias > -1.0f ? -1.0f : ps_r__tf_Mipbias;
         SSManager.SetMipLODBias(baseBias + log2f(float(RenderWidth()) / Device.dwWidth));
     }
-    // r_upscaler_jitter 0 is a diagnostic: temporal reconstruction without sub-pixel jitter.
     rasterJitter = Active() ? Jitter(jitterIndex++, renderSize, {Device.dwWidth, Device.dwHeight}) : Offset{};
-    if (!ps_r_upscaler_jitter) rasterJitter = {};
     if (TemporalScene()) aoe_temporal::BeginFrame();
 }
 
@@ -241,8 +239,6 @@ void EndScene(bool invalidateHistory)
     rasterJitter = {};
     if (invalidateHistory) { ResetHistory(); jitterIndex = 0; haveCamera = false; previousJitter = {}; }
 }
-
-void TraceEvaluations(unsigned count) { traceEvaluations = count; }
 
 bool Evaluate(ID3D11Texture2D* color, ID3D11Texture2D* motion, ID3D11Texture2D* reactive)
 {
@@ -264,20 +260,6 @@ bool Evaluate(ID3D11Texture2D* color, ID3D11Texture2D* motion, ID3D11Texture2D* 
     frame.cameraFar = -Device.mProject._43 / (Device.mProject._33 - 1.0f);
     frame.verticalFov = 2.0f * atanf(1.0f / Device.mProject._22);
     const bool success = useFsr ? fsrBackend.Evaluate(frame) : backend.Evaluate(frame);
-    if (traceEvaluations && useFsr)
-    {
-        --traceEvaluations;
-        static Fvector tracePosition, traceDirection;
-        // Camera change since the previous traced evaluation, as screen pixels of rotation at the render resolution.
-        const float turn = acosf(clampr(traceDirection.dotproduct(Device.vCameraDirection), -1.0f, 1.0f)) *
-            RenderHeight() / frame.verticalFov;
-        Msg("[FSR3 trace] frame=%u reset=%u ok=%u jitter=(%.4f,%.4f) dt=%.2fms cam_move=%.6fm cam_turn=%.4fpx view_same=%u",
-            frame.frame, unsigned(fsrBackend.LastReset()), unsigned(success), frame.jitter.x, frame.jitter.y,
-            frame.deltaMilliseconds, tracePosition.distance_to(Device.vCameraPosition), turn,
-            unsigned(!memcmp(&Device.mView, &Device.mView_prev, sizeof(Fmatrix))));
-        tracePosition = Device.vCameraPosition;
-        traceDirection = Device.vCameraDirection;
-    }
     if (success && !reportedEvaluation)
     {
         SetRendererError(nullptr);

@@ -186,13 +186,6 @@ void CRenderTarget::phase_dlss_postprocess()
         RCache.set_Stencil(FALSE);
         RCache.set_ColorWriteEnable();
         DrawNativeScreenQuad(s_aoe_motion_resolve->E[0], float(dlss::RenderWidth()), float(dlss::RenderHeight()));
-        // r_upscaler_motion 0 is a diagnostic: reconstruct with zero motion vectors and no reactive mask.
-        if (!ps_r_upscaler_motion)
-        {
-            const float zero[4]{};
-            HW.pContext->ClearRenderTargetView(rt_aoe_motion_resolved->pRT, zero);
-            HW.pContext->ClearRenderTargetView(rt_aoe_reactive->pRT, zero);
-        }
     }
 	const bool dlssOutput = dlss::Evaluate(color, rt_aoe_motion_resolved->pSurface, rt_aoe_reactive->pSurface);
 	dlss::EndScene();

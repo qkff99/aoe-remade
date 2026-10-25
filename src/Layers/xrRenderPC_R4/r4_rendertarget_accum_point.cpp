@@ -1,5 +1,4 @@
 #include "stdafx.h"
-#include "LocalLightDebug.h"
 
 template<bool Recorded, class Light>
 void CRenderTarget::accum_point_impl(Light* L, u32& marker)
@@ -7,7 +6,6 @@ void CRenderTarget::accum_point_impl(Light* L, u32& marker)
 	PROF_EVENT("CRenderTarget::accum_point");
     if constexpr (!Recorded)
     {
-        if (LocalLightDebug::active) LocalLightDebug::Submitted(*L);
         phase_accumulator();
         ++RImplementation.stats.l_visible;
     }

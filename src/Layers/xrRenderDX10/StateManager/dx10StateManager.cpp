@@ -39,7 +39,7 @@ bool dx10StateManager::TemporalHistorySafe()
 bool dx10StateManager::TemporalBlended()
 {
     ValidateBDesc();
-    return ps_r_upscaler_alpha_motion && !m_BDesc.AlphaToCoverageEnable && m_BDesc.RenderTarget[0].BlendEnable;
+    return !m_BDesc.AlphaToCoverageEnable && m_BDesc.RenderTarget[0].BlendEnable;
 }
 #endif
 
@@ -247,8 +247,7 @@ void dx10StateManager::Apply()
                 for (unsigned i = 1; i < 8; ++i) description.RenderTarget[i] = description.RenderTarget[0];
             description.IndependentBlendEnable = TRUE;
             // Blended draws weight motion/reactive by their alpha (the pixel shader writes it to .w).
-            const bool blended = ps_r_upscaler_alpha_motion && !description.AlphaToCoverageEnable &&
-                                 description.RenderTarget[0].BlendEnable;
+            const bool blended = !description.AlphaToCoverageEnable && description.RenderTarget[0].BlendEnable;
             auto& motion = description.RenderTarget[4];
             motion.BlendEnable = blended;
             motion.SrcBlend = D3D11_BLEND_SRC_ALPHA;

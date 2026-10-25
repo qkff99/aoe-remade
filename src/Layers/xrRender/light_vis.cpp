@@ -3,7 +3,6 @@
 #include "QueryHelper.h"
 #include "../../xrEngine/cl_intersect.h"
 #if defined(USE_DX11) && RENDER == R_R4
-#include "../xrRenderPC_R4/LocalLightDebug.h"
 #include "../xrRenderPC_R4/Dlss/DlssIntegration.h"
 #endif
 
@@ -57,19 +56,12 @@ void light::vis_prepare()
     {
         vis.visible = false;
         vis.pending = false;
-#if defined(USE_DX11) && RENDER == R_R4
-        if (LocalLightDebug::active) LocalLightDebug::Visibility(*this, LocalLightDebug::Reason::Inactive);
-#endif
         return;
     }
     if (!flags.bOccq || flags.bHudMode)
     {
         vis.visible = true;
         vis.pending = false;
-#if defined(USE_DX11) && RENDER == R_R4
-        if (LocalLightDebug::active) LocalLightDebug::Visibility(*this,
-            flags.bHudMode ? LocalLightDebug::Reason::Hud : LocalLightDebug::Reason::OccqDisabled);
-#endif
         return;
     }
 
@@ -80,16 +72,9 @@ void light::vis_prepare()
         // Preserve pending-query ownership; only revoke its old hidden answer.
         vis.visible = true;
         vis.frame2test = frame;
-        if (LocalLightDebug::active) LocalLightDebug::Visibility(*this, LocalLightDebug::Reason::ViewChanged);
     }
 #endif
-    if (frame < vis.frame2test)
-    {
-#if defined(USE_DX11) && RENDER == R_R4
-        if (LocalLightDebug::active) LocalLightDebug::Cached(*this);
-#endif
-        return;
-    }
+    if (frame < vis.frame2test) return;
 
     float safe_area = VIEWPORT_NEAR;
     {
@@ -119,11 +104,6 @@ void light::vis_prepare()
         vis.visible = true;
         vis.pending = false;
         vis.frame2test = frame + ::Random.randI(delay_small_min, delay_small_max);
-#if defined(USE_DX11) && RENDER == R_R4
-        if (LocalLightDebug::active) LocalLightDebug::Visibility(*this, skiptest ?
-            (flags.bShadow ? LocalLightDebug::Reason::ShadowTestDisabled : LocalLightDebug::Reason::UnshadowedTestDisabled) :
-            LocalLightDebug::Reason::NearCamera, near_limit);
-#endif
         return;
     }
 
@@ -161,9 +141,6 @@ void light::vis_prepare()
         RCache.set_Stencil(TRUE, D3DCMP_LESSEQUAL, 0x01, 0xff, 0x00);
     RImplementation.Target->draw_volume(this);
     CHK_DX(EndQuery(vis.Q));
-#if defined(USE_DX11) && RENDER == R_R4
-    if (LocalLightDebug::active) LocalLightDebug::QueryIssued(*this);
-#endif
 }
 
 void light::vis_update()
@@ -180,7 +157,6 @@ void light::vis_update()
     {
         vis.visible = true;
         vis.frame2test = Device.dwFrame;
-        if (LocalLightDebug::active) LocalLightDebug::Visibility(*this, LocalLightDebug::Reason::ViewChanged);
     }
 #endif
     if (!vis.pending) return;
@@ -200,9 +176,6 @@ void light::vis_update()
             vis.pending = false;
             vis.frame2test = frame + ::Random.randI(delay_small_min, delay_small_max);
         }  
-#if defined(USE_DX11) && RENDER == R_R4
-        if (LocalLightDebug::active) LocalLightDebug::QueryResult(*this, hr, fragments);
-#endif
         return;
     }
     
@@ -225,7 +198,5 @@ void light::vis_update()
         vis.frame2test = frame + 1;
         vis.hidden_streak = 0;
     }
-    if (LocalLightDebug::active) LocalLightDebug::QueryResult(*this, hr, fragments);
-    if (!current_view && LocalLightDebug::active) LocalLightDebug::Visibility(*this, LocalLightDebug::Reason::ViewChanged);
 #endif
 }

@@ -19,7 +19,6 @@ void Shutdown();
 void BeginFrame();
 void AnimationHistory(bool grass, const Fvector4 &previous_wave, const Fvector4 &previous_wind);
 void ProfileFrame();
-void RequestDump();
 void ResetHistory();
 void SetSceneGeometry(bool enabled);
 void SetIdentity(const void *visual, const void *object, bool hud = false);

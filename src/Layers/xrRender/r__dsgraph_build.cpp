@@ -1,6 +1,5 @@
 #include "stdafx.h"
 #include "FVisual.h"
-#include "../../xrEngine/CustomHUD.h"
 #if defined(USE_DX11) && RENDER == R_R4
 #include "../xrRenderPC_R4/RenderViewPreparation.h"
 #endif
@@ -73,20 +72,11 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 	float SSA = CalcSSA(distSQ, Center, pVisual);
     Flags16& flags = pVisual->flags;
     ShaderElement* sh_d = &*pVisual->shader->E[4];
-    const bool hud_trace = g_hud_trace && i_mask[CDSGraphManager::fl_hud];
-    const auto trace = [&](const char* what)
-    {
-        if (hud_trace)
-            HudTraceMsg("[HUD] %s: ssa=%.4f discard=%.4f distance=%.3f radius=%.3f ignore_flag=%u emissive=%u", what, SSA,
-                r_ssaDISCARD, _sqrt(distSQ), pVisual->vis.sphere.R,
-                unsigned(flags.test(IRenderVisualFlags::eIgnoreOptimization)), unsigned(sh_d && sh_d->flags.bEmissive));
-    };
     if (!(flags.test(IRenderVisualFlags::eIgnoreOptimization) || (sh_d && sh_d->flags.bEmissive)))
     {
         if (SSA < r_ssaDISCARD)
         {
             //Msg("SSA %.2f discarded", SSA);
-            trace("dropped by SSA discard");
             return;
         }
     }
@@ -102,10 +92,7 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
             Fbox world_bb;
             world_bb.xform(pVisual->vis.box, *xform);
             if (!RImplementation.HOM.visible(world_bb))
-            {
-                trace("dropped by HOM");
                 return;
-            }
         }
     }
 
@@ -136,10 +123,7 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 	ShaderElement* sh = RImplementation.rimp_select_sh_dynamic(pVisual, distSQ);
 
 	if (0==sh)
-	{
-		trace("dropped: no shader element");
 		return;
-	}
 	u32 shader_priority = sh->flags.iPriority/2;
 #if RENDER == R_R1 || RENDER == R_R2
     if (i_mask[CDSGraphManager::fl_hud] && sh->flags.iScopeLense)
@@ -157,11 +141,7 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 #endif
 
 	if (!i_mask[shader_priority])
-	{
-		trace("dropped: shader priority not in this pass");
 		return;
-	}
-	trace("queued");
 
 	// Create common node
 	// NOTE: Invisible elements exist only in R1

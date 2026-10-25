@@ -3,9 +3,6 @@
 
 #include "QueryHelper.h"
 #include "../../xrEngine/IGame_Level.h"
-#if defined(USE_DX11) && RENDER == R_R4
-#include "../xrRenderPC_R4/LocalLightDebug.h"
-#endif
 
 extern int ps_r2_shadow_omnipart_vischeck;
 
@@ -63,7 +60,6 @@ light::light()
 light::~light()
 {
 #if defined(USE_DX11) && RENDER == R_R4
-    LocalLightDebug::Forget(this);
     if (RImplementation.local_light_shadows) RImplementation.local_light_shadows->Forget(this);
 #endif
 	m_parent = nullptr;

@@ -1,13 +1,6 @@
 #pragma once
 
 ENGINE_API extern Flags32 psHUD_Flags;
-// r4_hud_dump: one frame of log lines explaining why HUD models are or are not drawn.
-ENGINE_API extern bool g_hud_trace, g_hud_trace_armed;
-// r4_hud_watch: trace every frame, print only the frames whose HUD queue differs from the previous frame.
-ENGINE_API extern int g_hud_watch;
-ENGINE_API void HudTraceMsg(const char* format, ...);
-ENGINE_API void HudTraceBegin(bool one_shot);
-ENGINE_API void HudTraceEnd(u32 queued);
 #define HUD_CROSSHAIR (1<<0)
 #define HUD_CROSSHAIR_DIST (1<<1)
 #define HUD_WEAPON (1<<2)

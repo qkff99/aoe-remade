@@ -7,7 +7,6 @@
 #include "static_cast_checked.hpp"
 #include "actoreffector.h"
 #include "../xrEngine/IGame_Persistent.h"
-#include "../xrEngine/CustomHUD.h"
 #include "inventory_item.h"
 #include "weapon.h"
 #include "script_attachment_manager.h"
@@ -979,8 +978,6 @@ void player_hud::render_hud(IDSGraphManager* DM)
 	bool b_r0 = ((m_attached_items[0] && m_attached_items[0]->need_renderable()) || script_anim_part == 0 || script_anim_part == 2);
 	bool b_r1 = ((m_attached_items[1] && m_attached_items[1]->need_renderable()) || script_anim_part == 1 || script_anim_part == 2);
 
-	if (g_hud_trace)
-		HudTraceMsg("[HUD] render_hud: renderable item0=%u item1=%u script_part=%d", u32(b_r0), u32(b_r1), int(script_anim_part));
 	if (!b_r0 && !b_r1) return;
 
 	DM->add_Dynamic(m_model->dcast_RenderVisual(), &m_transform);

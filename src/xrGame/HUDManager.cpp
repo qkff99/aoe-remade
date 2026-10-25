@@ -213,16 +213,8 @@ void CHUDManager::Render_Last(IDSGraphManager* DM)
 {
 	if (0 == pUIGame) return;
 	if (g_actor) g_actor->RenderCamAttached(DM);
-	if (!psHUD_Flags.is(HUD_WEAPON | HUD_WEAPON_RT | HUD_WEAPON_RT2 | HUD_DRAW_RT2))
-	{
-		if (g_hud_trace) HudTraceMsg("[HUD] Render_Last: HUD weapon flags are off");
-		return;
-	}
-	if (!need_render_hud())
-	{
-		if (g_hud_trace) HudTraceMsg("[HUD] Render_Last: need_render_hud() is false");
-		return;
-	}
+	if (!psHUD_Flags.is(HUD_WEAPON | HUD_WEAPON_RT | HUD_WEAPON_RT2 | HUD_DRAW_RT2))return;
+	if (!need_render_hud()) return;
 
 	CObject* O = g_pGameLevel->CurrentViewEntity();
 	// hud itself
