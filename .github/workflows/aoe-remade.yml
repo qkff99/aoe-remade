@@ -1,6 +1,6 @@
 name: AOE-Remade
 
-# Builds DX11 and DX11 Optick (ProfiledDX11) executables and packs gamedata into one archive.
+# Builds the DX11 executable and packs gamedata into one archive. The Optick build (ProfiledDX11) is local only.
 # Push to AOE-Remade or run manually: the archive is uploaded as a workflow artifact.
 # Push a tag named aoe-*: the same archive is also published as a GitHub release.
 on:
@@ -50,12 +50,8 @@ jobs:
         retention-days: 1
 
   build:
-    name: build-${{ matrix.buildconf }}
+    name: build-dx11
     runs-on: windows-latest
-    strategy:
-      matrix:
-        # DX11 -> AnomalyDX11.exe, ProfiledDX11 -> AnomalyDX11Optick.exe
-        buildconf: [ "DX11", "ProfiledDX11" ]
     steps:
     - name: Configure Pagefile
       uses: al-cheb/configure-pagefile-action@v1.3
@@ -72,13 +68,13 @@ jobs:
       with:
         msbuild-architecture: "x64"
 
-    - name: Build ${{ matrix.buildconf }}
-      run: msbuild /p:Configuration=${{ matrix.buildconf }} /p:Platform=x64 ${{ env.SOLUTION_FILE_PATH }}
+    - name: Build DX11
+      run: msbuild /p:Configuration=DX11 /p:Platform=x64 ${{ env.SOLUTION_FILE_PATH }}
 
     - name: Upload exe
       uses: actions/upload-artifact@v4.6.0
       with:
-        name: ${{ matrix.buildconf }}_exe
+        name: DX11_exe
         path: ./_build/_game/bin_dbg/*.exe
         if-no-files-found: error
         retention-days: 1
@@ -98,7 +94,7 @@ jobs:
       run: |
         NAME="AOE-Remade_$(date +'%Y.%-m.%-d')_${GITHUB_SHA::7}"
         mkdir -p release/bin release/db/mods
-        mv DX11_exe/*.exe ProfiledDX11_exe/*.exe release/bin
+        mv DX11_exe/*.exe release/bin
         mv ${{ env.PACK_GAMEDATA_NAME }}/*.db0 release/db/mods
         (cd release && zip -r "../$NAME.zip" ./*)
         echo "name=$NAME" >> "$GITHUB_OUTPUT"
